@@ -84,9 +84,9 @@ export function ActivityFormDialog({
       type: activity?.type || 'TASK',
       subject: activity?.subject || '',
       dueAt: activity?.dueAt ? new Date(activity.dueAt) : undefined,
-      dealId: activity?.deal?.id || '',
-      personId: activity?.person?.id || '',
-      organizationId: activity?.organization?.id || '',
+      dealId: activity?.deal?.id || undefined,
+      personId: activity?.person?.id || undefined,
+      organizationId: activity?.organization?.id || undefined,
       note: activity?.note || ''
     }
   });
@@ -99,9 +99,9 @@ export function ActivityFormDialog({
           type: activity.type,
           subject: activity.subject,
           dueAt: activity.dueAt ? new Date(activity.dueAt) : undefined,
-          dealId: activity.deal?.id || '',
-          personId: activity.person?.id || '',
-          organizationId: activity.organization?.id || '',
+          dealId: activity.deal?.id || undefined,
+          personId: activity.person?.id || undefined,
+          organizationId: activity.organization?.id || undefined,
           note: activity.note || ''
         });
       }
@@ -258,7 +258,6 @@ export function ActivityFormDialog({
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    <SelectItem value=''>None</SelectItem>
                     {deals.map((deal) => (
                       <SelectItem key={deal.id} value={deal.id}>
                         {deal.title}
@@ -289,7 +288,6 @@ export function ActivityFormDialog({
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value=''>None</SelectItem>
                       {persons.map((person) => (
                         <SelectItem key={person.id} value={person.id}>
                           {person.firstName} {person.lastName}
@@ -319,7 +317,6 @@ export function ActivityFormDialog({
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value=''>None</SelectItem>
                       {organizations.map((org) => (
                         <SelectItem key={org.id} value={org.id}>
                           {org.name}
