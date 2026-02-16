@@ -1,12 +1,26 @@
-import { redirect } from 'next/navigation';
-import { getSession } from '@/lib/supertokens/backend';
+'use client';
 
-export default async function Dashboard() {
-  const session = await getSession();
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
+import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 
-  if (!session) {
-    return redirect('/auth/sign-in');
-  } else {
-    redirect('/dashboard/overview');
-  }
+export default function Dashboard() {
+  const router = useRouter();
+  const session = useSessionContext();
+
+  useEffect(() => {
+    if (session.loading) return;
+
+    if (session.doesSessionExist) {
+      router.replace('/dashboard/overview');
+    } else {
+      router.replace('/auth/sign-in');
+    }
+  }, [session, router]);
+
+  return (
+    <div className='flex h-screen items-center justify-center'>
+      <p className='text-muted-foreground'>Loading...</p>
+    </div>
+  );
 }

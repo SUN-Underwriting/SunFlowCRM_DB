@@ -14,17 +14,29 @@ datasource db {
 // ============================================
 
 model Tenant {
-  id        String       @id @default(cuid())
-  name      String
-  slug      String       @unique
-  plan      Plan         @default(STARTER)
-  status    TenantStatus @default(ACTIVE)
-  settings  Json         @default("{}")
+  id       String       @id @default(cuid())
+  name     String
+  slug     String       @unique
+  plan     Plan         @default(STARTER)
+  status   TenantStatus @default(ACTIVE)
+  settings Json         @default("{}")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   users User[]
+
+  // CRM Relations
+  organizations    Organization[]
+  persons          Person[]
+  pipelines        Pipeline[]
+  stages           Stage[]
+  deals            Deal[]
+  leads            Lead[]
+  activities       Activity[]
+  emails           Email[]
+  emailAccounts    EmailAccount[]
+  fieldDefinitions FieldDefinition[]
 
   @@map("tenants")
 }
@@ -42,11 +54,11 @@ enum TenantStatus {
 }
 
 model User {
-  id                String     @id @default(cuid())
-  supertokensUserId String     @unique
+  id                String @id @default(cuid())
+  supertokensUserId String @unique
   tenantId          String
 
-  email     String     // Changed from @unique to allow same email in different tenants
+  email     String // Changed from @unique to allow same email in different tenants
   firstName String?
   lastName  String?
   avatar    String?
@@ -64,11 +76,12 @@ model User {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  // New fields from the provided edit
-  // tradingAccounts   TradingAccount[]
-  // complianceChecks  ComplianceCheck[]
-  // auditLogsCreated  AuditLog[]          @relation("AuditLogCreatedBy")
-  // auditLogsAffected AuditLog[]          @relation("AuditLogTargetUser")
+  // CRM Relations
+  deals         Deal[]
+  leads         Lead[]
+  activities    Activity[]
+  emails        Email[]
+  emailAccounts EmailAccount[]
 
   @@unique([email, tenantId], name: "user_email_tenant_unique")
   @@index([tenantId])
@@ -89,4 +102,420 @@ enum UserStatus {
   INACTIVE
   SUSPENDED
   INVITED
+}
+
+// ============================================
+// CORE INFRASTRUCTURE - Audit Logging
+// ============================================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  tenantId  String?
+  userId    String?
+  action    String // e.g. "USER_INVITED", "DEAL_CREATED", "SETTINGS_UPDATED"
+  module    String // e.g. "USERS", "DEALS", "SETTINGS", "AUTH"
+  entityId  String? // ID of the affected entity
+  entityType String? // e.g. "User", "Deal", "Pipeline"
+  details   Json     @default("{}") // Additional context (old/new values, metadata)
+  ip        String?
+  userAgent String?  @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, module])
+  @@index([tenantId, action])
+  @@index([userId])
+  @@index([entityId, entityType])
+  @@map("audit_logs")
+}
+
+// ============================================
+// CRM DOMAIN MODELS
+// ============================================
+
+// --- Contacts Module ---
+
+model Organization {
+  id         String    @id @default(cuid())
+  tenantId   String
+  name       String
+  address    String?
+  industry   String?
+  size       String? // e.g., "1-10", "11-50", "51-200", etc.
+  website    String?
+  phone      String?
+  customData Json      @default("{}")
+  deleted    Boolean   @default(false)
+  deletedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  persons    Person[]
+  deals      Deal[]
+  leads      Lead[]
+  activities Activity[]
+  emails     Email[]
+
+  @@index([tenantId])
+  @@index([tenantId, deleted])
+  @@map("organizations")
+}
+
+model Person {
+  id         String    @id @default(cuid())
+  tenantId   String
+  orgId      String?
+  firstName  String
+  lastName   String
+  email      String?
+  phone      String?
+  jobTitle   String?
+  customData Json      @default("{}")
+  deleted    Boolean   @default(false)
+  deletedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  deals        Deal[]
+  leads        Lead[]
+  activities   Activity[]
+  emails       Email[]
+
+  @@index([tenantId])
+  @@index([tenantId, deleted])
+  @@index([email])
+  @@map("persons")
+}
+
+// --- Sales Pipeline Module ---
+
+model Pipeline {
+  id        String    @id @default(cuid())
+  tenantId  String
+  name      String
+  isDefault Boolean   @default(false)
+  sortOrder Int       @default(0)
+  deleted   Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stages Stage[]
+  deals  Deal[]
+
+  @@index([tenantId])
+  @@index([tenantId, isDefault])
+  @@index([tenantId, deleted])
+  @@map("pipelines")
+}
+
+model Stage {
+  id          String    @id @default(cuid())
+  tenantId    String
+  pipelineId  String
+  name        String
+  probability Decimal   @default(0) @db.Decimal(5, 2) // 0-100
+  sortOrder   Int       @default(0)
+  isRotten    Boolean   @default(false)
+  rottenDays  Int? // Days before deal becomes rotten
+  deleted     Boolean   @default(false)
+  deletedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  pipeline Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  deals    Deal[]
+
+  @@index([tenantId])
+  @@index([pipelineId, sortOrder])
+  @@index([tenantId, deleted])
+  @@map("stages")
+}
+
+model Deal {
+  id                String     @id @default(cuid())
+  tenantId          String
+  pipelineId        String
+  stageId           String
+  ownerId           String
+  personId          String?
+  orgId             String?
+  title             String
+  value             Decimal    @default(0) @db.Decimal(18, 2)
+  currency          String     @default("USD")
+  status            DealStatus @default(OPEN)
+  expectedCloseDate DateTime?  @db.Date
+  wonAt             DateTime?
+  lostAt            DateTime?
+  lostReason        String?
+  customData        Json       @default("{}")
+  deleted           Boolean    @default(false)
+  deletedAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant             Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  pipeline           Pipeline      @relation(fields: [pipelineId], references: [id], onDelete: Restrict)
+  stage              Stage         @relation(fields: [stageId], references: [id], onDelete: Restrict)
+  owner              User          @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  person             Person?       @relation(fields: [personId], references: [id], onDelete: SetNull)
+  organization       Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  activities         Activity[]
+  emails             Email[]
+  convertedFromLeads Lead[]
+
+  @@index([tenantId])
+  @@index([tenantId, deleted])
+  @@index([tenantId, status, expectedCloseDate])
+  @@index([pipelineId, stageId])
+  @@index([ownerId])
+  @@map("deals")
+}
+
+// --- Leads Module ---
+
+model Lead {
+  id              String     @id @default(cuid())
+  tenantId        String
+  ownerId         String
+  personId        String?
+  orgId           String?
+  title           String
+  source          String? // e.g., "Website", "Referral", "Cold Call"
+  status          LeadStatus @default(NEW)
+  convertedDealId String?
+  deleted         Boolean    @default(false)
+  deletedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner           User          @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  person          Person?       @relation(fields: [personId], references: [id], onDelete: SetNull)
+  organization    Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  convertedToDeal Deal?         @relation(fields: [convertedDealId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, deleted])
+  @@index([ownerId])
+  @@map("leads")
+}
+
+// --- Activities Module ---
+
+model Activity {
+  id          String       @id @default(cuid())
+  tenantId    String
+  ownerId     String
+  type        ActivityType
+  subject     String
+  dueAt       DateTime?
+  done        Boolean      @default(false)
+  dealId      String?
+  personId    String?
+  orgId       String?
+  note        String?      @db.Text
+  completedAt DateTime?
+  deleted     Boolean      @default(false)
+  deletedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner        User          @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  deal         Deal?         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  person       Person?       @relation(fields: [personId], references: [id], onDelete: SetNull)
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, done, dueAt])
+  @@index([tenantId, deleted])
+  @@index([dealId])
+  @@index([personId])
+  @@index([ownerId])
+  @@map("activities")
+}
+
+// --- Email Module ---
+
+model Email {
+  id                    String         @id @default(cuid())
+  tenantId              String
+  userId                String
+  providerAccountId     String?
+  direction             EmailDirection
+  subject               String
+  from                  String
+  to                    String
+  cc                    String?
+  bcc                   String?
+  messageId             String         @unique
+  inReplyTo             String?
+  references            String?        @db.Text
+  sentAt                DateTime?
+  receivedAt            DateTime?
+  bodyPreview           String?        @db.Text
+  hasHtmlBody           Boolean        @default(false)
+  hasTextBody           Boolean        @default(false)
+  threadId              String?
+  dealId                String?
+  personId              String?
+  orgId                 String?
+  isLinkedAutomatically Boolean        @default(false)
+  deleted               Boolean        @default(false)
+  deletedAt             DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user           User                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  account        EmailAccount?        @relation(fields: [providerAccountId], references: [id], onDelete: SetNull)
+  deal           Deal?                @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  person         Person?              @relation(fields: [personId], references: [id], onDelete: SetNull)
+  organization   Organization?        @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  trackingEvents EmailTrackingEvent[]
+
+  @@index([tenantId])
+  @@index([tenantId, direction])
+  @@index([tenantId, deleted])
+  @@index([threadId])
+  @@index([dealId])
+  @@index([personId])
+  @@index([userId])
+  @@map("emails")
+}
+
+model EmailAccount {
+  id           String        @id @default(cuid())
+  tenantId     String
+  userId       String
+  provider     EmailProvider
+  imapHost     String?
+  imapPort     Int?
+  smtpHost     String?
+  smtpPort     Int?
+  encryption   String? // "SSL", "TLS", "STARTTLS"
+  oauthToken   String?       @db.Text // Encrypted OAuth token
+  syncFromDate DateTime?     @db.Date
+  folders      Json          @default("[]") // Array of folder names to sync
+  isActive     Boolean       @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emails Email[]
+
+  @@index([tenantId])
+  @@index([userId])
+  @@map("email_accounts")
+}
+
+model EmailTrackingEvent {
+  id         String            @id @default(cuid())
+  emailId    String
+  type       TrackingEventType
+  occurredAt DateTime          @default(now())
+  ip         String?
+  userAgent  String?           @db.Text
+
+  email Email @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@index([emailId])
+  @@map("email_tracking_events")
+}
+
+// --- Custom Fields Module ---
+
+model FieldDefinition {
+  id         String          @id @default(cuid())
+  tenantId   String
+  entityType FieldEntityType
+  key        String // e.g., "industry", "deal_source"
+  label      String // e.g., "Industry", "Deal Source"
+  fieldType  FieldType
+  options    Json? // For SELECT/MULTI_SELECT: ["Option1", "Option2"]
+  sortOrder  Int             @default(0)
+  deleted    Boolean         @default(false)
+  deletedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entityType, key])
+  @@index([tenantId, entityType])
+  @@index([tenantId, deleted])
+  @@map("field_definitions")
+}
+
+// ============================================
+// CRM ENUMS
+// ============================================
+
+enum DealStatus {
+  OPEN
+  WON
+  LOST
+}
+
+enum LeadStatus {
+  NEW
+  IN_PROGRESS
+  ARCHIVED
+  CONVERTED
+}
+
+enum ActivityType {
+  CALL
+  MEETING
+  TASK
+  EMAIL
+}
+
+enum EmailDirection {
+  INCOMING
+  OUTGOING
+}
+
+enum EmailProvider {
+  GMAIL
+  OUTLOOK
+  IMAP
+}
+
+enum TrackingEventType {
+  OPEN
+  CLICK
+}
+
+enum FieldEntityType {
+  DEAL
+  PERSON
+  ORGANIZATION
+}
+
+enum FieldType {
+  TEXT
+  NUMBER
+  DATE
+  SELECT
+  MULTI_SELECT
 }

@@ -1,9 +1,9 @@
 import { AsyncLocalStorage } from 'async_hooks';
 
 export interface RequestContext {
-    tenantId: string;
-    userId: string;
-    bypassRls?: boolean;
+  tenantId: string;
+  userId: string;
+  bypassRls?: boolean;
 }
 
 const asyncLocalStorage = new AsyncLocalStorage<RequestContext>();
@@ -12,15 +12,19 @@ const asyncLocalStorage = new AsyncLocalStorage<RequestContext>();
  * Get the current request context
  */
 export function getRequestContext(): RequestContext | undefined {
-    return asyncLocalStorage.getStore();
+  return asyncLocalStorage.getStore();
 }
 
 /**
- * Enter a new request context
- * Call this when starting a new request with tenant/user info
+ * Run a function within a request context.
+ * Uses AsyncLocalStorage.run() for proper async isolation —
+ * the context is scoped to the callback and cannot leak to other requests.
  */
-export function enterRequestContext(context: RequestContext): void {
-    asyncLocalStorage.enterWith(context);
+export async function runInRequestContext<T>(
+  context: RequestContext,
+  fn: () => Promise<T>
+): Promise<T> {
+  return asyncLocalStorage.run(context, fn);
 }
 
 /**
@@ -28,28 +32,28 @@ export function enterRequestContext(context: RequestContext): void {
  * Useful for operations that need to query across tenants
  */
 export async function withRlsBypass<T>(fn: () => Promise<T>): Promise<T> {
-    const currentContext = getRequestContext();
+  const currentContext = getRequestContext();
 
-    // If no context, just run the function
-    if (!currentContext) {
-        return fn();
-    }
+  // If no context, just run the function
+  if (!currentContext) {
+    return fn();
+  }
 
-    // Create new context with bypass flag
-    const bypassContext: RequestContext = {
-        ...currentContext,
-        bypassRls: true,
-    };
+  // Create new context with bypass flag
+  const bypassContext: RequestContext = {
+    ...currentContext,
+    bypassRls: true
+  };
 
-    return asyncLocalStorage.run(bypassContext, fn);
+  return asyncLocalStorage.run(bypassContext, fn);
 }
 
 /**
  * Execute a function within a specific tenant context
  */
 export async function withTenantContext<T>(
-    context: RequestContext,
-    fn: () => Promise<T>
+  context: RequestContext,
+  fn: () => Promise<T>
 ): Promise<T> {
-    return asyncLocalStorage.run(context, fn);
+  return asyncLocalStorage.run(context, fn);
 }

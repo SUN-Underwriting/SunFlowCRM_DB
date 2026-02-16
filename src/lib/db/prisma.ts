@@ -1,27 +1,30 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
-import { createRlsMiddleware } from '@/lib/db/prisma-rls-middleware';
+import { createRlsExtension } from '@/lib/db/prisma-rls-extension';
 
 // PostgreSQL connection pool
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+  connectionString: process.env.DATABASE_URL
 });
 
 // Prisma adapter for PostgreSQL (required in Prisma 7)
 const adapter = new PrismaPg(pool);
 
 const globalForPrisma = globalThis as unknown as {
-    prisma: PrismaClient;
+  prisma: ReturnType<typeof createPrismaClient>;
 };
 
-export const prisma = globalForPrisma.prisma || (() => {
-    const client = new PrismaClient({ adapter });
-    client.$use(createRlsMiddleware());
-    return client;
-})();
+function createPrismaClient() {
+  const client = new PrismaClient({ adapter });
+  // Apply RLS extension for automatic tenant isolation
+  return client.$extends(createRlsExtension());
+}
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+export const prisma = globalForPrisma.prisma || createPrismaClient();
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma;
+}
 
 export default prisma;
-

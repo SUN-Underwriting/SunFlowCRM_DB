@@ -1,7 +1,13 @@
-import { getSession } from 'supertokens-node/recipe/session';
+import { withSession } from 'supertokens-node/nextjs';
 import { NextRequest, NextResponse } from 'next/server';
 import { ensureSuperTokensInit } from '@/lib/supertokens/config';
-import { enterRequestContext } from '@/lib/db/rls-context';
+import { runInRequestContext } from '@/lib/db/rls-context';
+import {
+  UnauthorizedError,
+  TenantContextMissingError,
+  ForbiddenError
+} from '@/lib/errors/app-errors';
+import type { SessionContainer } from 'supertokens-node/recipe/session';
 
 // Ensure SuperTokens is initialized
 ensureSuperTokensInit();
@@ -11,126 +17,153 @@ ensureSuperTokensInit();
  * Contains user info including tenantId and roles for RBAC.
  */
 export interface SessionPayload {
-    userId: string;
-    tenantId: string;
-    roles: string[];
-    email?: string;
+  userId: string;
+  tenantId: string;
+  roles: string[];
+  email?: string;
 }
 
 /**
- * Get session payload from request.
- * Returns null if no valid session exists.
- * 
- * @example
- * const session = await getSessionPayload(request);
- * if (session) {
- *   const { tenantId, roles } = session;
- *   // Use tenantId for data isolation
- * }
+ * Extract session payload from SuperTokens SessionContainer.
+ * Helper to reduce code duplication.
  */
-export async function getSessionPayload(request: NextRequest): Promise<SessionPayload | null> {
-    try {
-        // Note: Using 'as any' because Next.js types don't perfectly match
-        const session = await getSession(request as any, undefined as any);
-        if (!session) return null;
+function extractSessionPayload(session: SessionContainer): SessionPayload {
+  const payload = session.getAccessTokenPayload();
 
-        const payload = session.getAccessTokenPayload();
+  // Critical: Enforce tenantId presence
+  if (!payload.tenantId) {
+    console.error('[Auth] SECURITY: Session missing tenantId:', {
+      userId: session.getUserId(),
+      email: payload.email
+    });
+    throw new TenantContextMissingError(
+      'Invalid session: missing tenant context'
+    );
+  }
 
-        // Critical: Enforce tenantId presence
-        // Empty tenantId would allow cross-tenant data leakage
-        if (!payload.tenantId) {
-            console.error('[Auth] Session missing tenantId:', {
-                userId: session.getUserId(),
-                email: payload.email
-            });
-            throw new Error('Invalid session: missing tenant context');
-        }
-
-        const sessionPayload: SessionPayload = {
-            userId: session.getUserId(),
-            tenantId: payload.tenantId,
-            roles: Array.isArray(payload.roles) ? payload.roles : [],
-            email: payload.email,
-        };
-
-        enterRequestContext({
-            tenantId: payload.tenantId,
-            userId: session.getUserId(),
-        });
-
-        return sessionPayload;
-    } catch (error) {
-        // Session doesn't exist or is invalid
-        return null;
-    }
+  return {
+    userId: session.getUserId(),
+    tenantId: payload.tenantId,
+    roles: Array.isArray(payload.roles) ? payload.roles : [],
+    email: payload.email
+  };
 }
 
 /**
- * Require a valid session. Throws if no session exists.
- * Use in API routes that require authentication.
- * 
+ * Get session payload without setting up RLS context.
+ * Useful for read-only operations that don't need DB access.
+ */
+export async function getSessionPayload(
+  request: NextRequest
+): Promise<SessionPayload | null> {
+  return new Promise((resolve) => {
+    withSession(request, async (err, session) => {
+      if (err || !session) {
+        resolve(null);
+        return NextResponse.json({ error: 'No session' }, { status: 401 });
+      }
+
+      try {
+        resolve(extractSessionPayload(session));
+      } catch (error) {
+        console.error('[Auth] getSessionPayload error:', error);
+        resolve(null);
+      }
+
+      return NextResponse.json({ ok: true });
+    });
+  });
+}
+
+/**
+ * Run a handler within a properly isolated async RLS context.
+ * Uses SuperTokens' withSession helper for proper cookie handling.
+ *
+ * This uses AsyncLocalStorage.run() (NOT enterWith()) to ensure
+ * the tenant context is correctly scoped to this request only,
+ * preventing cross-request context leakage under concurrent load.
+ *
  * @example
  * export async function GET(request: NextRequest) {
- *   try {
- *     const session = await requireSession(request);
- *     // ... handle authenticated request
- *   } catch (error) {
- *     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
- *   }
+ *   return withSessionContext(request, async (session) => {
+ *     // All DB operations here are automatically scoped to session.tenantId
+ *     const data = await prisma.deal.findMany({});
+ *     return apiResponse(data);
+ *   });
  * }
  */
-export async function requireSession(request: NextRequest): Promise<SessionPayload> {
-    const session = await getSessionPayload(request);
-    if (!session) {
-        throw new Error('Unauthorized: No valid session');
+export async function withSessionContext(
+  request: NextRequest,
+  handler: (session: SessionPayload) => Promise<NextResponse>
+): Promise<NextResponse> {
+  return withSession(request, async (err, session) => {
+    // Handle SuperTokens errors
+    if (err) {
+      console.error('[Auth] SuperTokens session error:', err);
+      throw new UnauthorizedError('Session error');
     }
-    return session;
+
+    // No session exists
+    if (!session) {
+      throw new UnauthorizedError('No valid session');
+    }
+
+    const sessionPayload = extractSessionPayload(session);
+
+    // Run handler within RLS context
+    return runInRequestContext(
+      {
+        tenantId: sessionPayload.tenantId,
+        userId: sessionPayload.userId
+      },
+      () => handler(sessionPayload)
+    );
+  });
 }
 
 /**
  * Require a specific role. Throws if user doesn't have the role.
- * Use in API routes that require specific permissions.
- * 
+ *
  * @example
  * export async function DELETE(request: NextRequest) {
- *   try {
- *     const session = await requireRole(request, 'ADMIN');
+ *   return withSessionContext(request, async (session) => {
+ *     requireRoleFromSession(session, 'ADMIN');
  *     // ... handle admin-only request
- *   } catch (error) {
- *     return NextResponse.json({ error: error.message }, { status: 403 });
- *   }
+ *   });
  * }
  */
-export async function requireRole(request: NextRequest, role: string): Promise<SessionPayload> {
-    const session = await requireSession(request);
-    if (!session.roles.includes(role)) {
-        throw new Error(`Forbidden: Requires ${role} role`);
-    }
-    return session;
+export function requireRoleFromSession(
+  session: SessionPayload,
+  role: string
+): void {
+  if (!session.roles.includes(role)) {
+    throw new ForbiddenError(`Requires ${role} role`);
+  }
 }
 
 /**
- * Require any of the specified roles.
+ * Require any of the specified roles from session payload.
  */
-export async function requireAnyRole(request: NextRequest, roles: string[]): Promise<SessionPayload> {
-    const session = await requireSession(request);
-    const hasAnyRole = roles.some(role => session.roles.includes(role));
-    if (!hasAnyRole) {
-        throw new Error(`Forbidden: Requires one of ${roles.join(', ')} roles`);
-    }
-    return session;
+export function requireAnyRoleFromSession(
+  session: SessionPayload,
+  roles: string[]
+): void {
+  const hasAnyRole = roles.some((role) => session.roles.includes(role));
+  if (!hasAnyRole) {
+    throw new ForbiddenError(`Requires one of ${roles.join(', ')} roles`);
+  }
 }
 
 /**
  * Create an unauthorized response.
  */
 export function unauthorizedResponse(message = 'Unauthorized') {
-    return NextResponse.json({ error: message }, { status: 401 });
+  return NextResponse.json({ error: message }, { status: 401 });
 }
 
 /**
  * Create a forbidden response.
  */
 export function forbiddenResponse(message = 'Forbidden') {
-    return NextResponse.json({ error: message }, { status: 403 });
+  return NextResponse.json({ error: message }, { status: 403 });
 }

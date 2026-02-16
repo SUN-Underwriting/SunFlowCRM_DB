@@ -1,13 +1,10 @@
 {
-  "name": "next-shadcn-dashboard-starter",
+  "name": "sun-mga-platform",
   "version": "1.0.0",
   "private": true,
-  "author": {
-    "name": "Kiran",
-    "url": "https://github.com/Kiranism"
-  },
+  "author": "SunApp AG",
   "scripts": {
-    "dev": "next dev",
+    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --hostname localhost",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -67,8 +64,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
-    "eslint": "8.48.0",
-    "eslint-config-next": "^16.0.7",
+    "dotenv": "^17.3.1",
     "input-otp": "^1.4.2",
     "kbar": "^0.1.0-beta.45",
     "lucide-react": "^0.476.0",
@@ -80,7 +76,6 @@
     "nuqs": "^2.4.1",
     "pg": "^8.18.0",
     "postcss": "8.4.49",
-    "prisma": "^7.3.0",
     "react": "^19.2.0",
     "react-day-picker": "^8.10.1",
     "react-dom": "^19.2.0",
@@ -105,6 +100,9 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "eslint": "8.48.0",
+    "eslint-config-next": "^16.0.7",
+    "prisma": "^7.3.0",
     "@faker-js/faker": "^9.3.0",
     "@types/node": "22.10.2",
     "@types/react": "^19.0.1",

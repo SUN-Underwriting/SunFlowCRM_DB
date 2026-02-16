@@ -58,12 +58,15 @@ services:
 
   # SuperTokens Core - Self-hosted authentication service
   supertokens:
-    image: registry.supertokens.io/supertokens/supertokens-postgresql:9.4
+    image: supertokens/supertokens-postgresql:latest
     ports:
       - "3567:3567"
     environment:
       POSTGRESQL_CONNECTION_URI: "postgresql://postgres:postgres@postgres:5432/supertokens"
-      API_KEYS: ""
+      # SECURITY: API key protects SuperTokens Core from unauthorized access.
+      # Must match SUPERTOKENS_API_KEY in .env / .env.local
+      # Generate with: openssl rand -hex 32
+      API_KEYS: "${SUPERTOKENS_API_KEY:-}"
     depends_on:
       postgres:
         condition: service_healthy

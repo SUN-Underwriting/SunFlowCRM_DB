@@ -1,50 +1,37 @@
 import { z } from 'zod';
 import { UserRole, UserStatus } from '@prisma/client';
 
-export const InviteUserSchema = z.object({
-    email: z.string().email(),
-    role: z.nativeEnum(UserRole),
-    firstName: z.string().trim().min(1).optional(),
-    lastName: z.string().trim().min(1).optional(),
-});
-
-export const UpdateUserSchema = z
-    .object({
-        role: z.nativeEnum(UserRole).optional(),
-        status: z.nativeEnum(UserStatus).optional(),
-    })
-    .refine((data) => data.role || data.status, {
-        message: 'At least one field is required.',
-        path: []
-    });
-import { z } from 'zod';
-
 /**
  * Validation schemas for Settings API routes
  */
 
 export const InviteUserSchema = z.object({
-    email: z.string().email('Invalid email address'),
-    role: z.enum(['ADMIN', 'MANAGER', 'UNDERWRITER', 'SALES', 'MEMBER']),
-    firstName: z.string().min(1).max(50).optional(),
-    lastName: z.string().min(1).max(50).optional(),
+  email: z.string().email('Invalid email address'),
+  role: z.nativeEnum(UserRole),
+  firstName: z.string().trim().min(1).max(50).optional(),
+  lastName: z.string().trim().min(1).max(50).optional()
 });
 
 export type InviteUserInput = z.infer<typeof InviteUserSchema>;
 
-export const UpdateUserSchema = z.object({
-    role: z.enum(['ADMIN', 'MANAGER', 'UNDERWRITER', 'SALES', 'MEMBER']).optional(),
-    status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED', 'INVITED']).optional(),
-}).strict(); // Reject unknown fields
+export const UpdateUserSchema = z
+  .object({
+    role: z.nativeEnum(UserRole).optional(),
+    status: z.nativeEnum(UserStatus).optional()
+  })
+  .refine((data) => data.role || data.status, {
+    message: 'At least one field is required.',
+    path: []
+  });
 
 export type UpdateUserInput = z.infer<typeof UpdateUserSchema>;
 
 export const AuthSettingsSchema = z.object({
-    inviteOnlyMode: z.boolean().optional(),
-    requireEmailVerification: z.boolean().optional(),
-    passwordMinLength: z.number().int().min(6).max(32).optional(),
-    sessionLifetimeHours: z.number().int().positive().optional(),
-    socialLoginEnabled: z.boolean().optional(),
+  inviteOnlyMode: z.boolean().optional(),
+  requireEmailVerification: z.boolean().optional(),
+  passwordMinLength: z.number().int().min(6).max(32).optional(),
+  sessionLifetimeHours: z.number().int().positive().optional(),
+  socialLoginEnabled: z.boolean().optional()
 });
 
 export type AuthSettingsInput = z.infer<typeof AuthSettingsSchema>;

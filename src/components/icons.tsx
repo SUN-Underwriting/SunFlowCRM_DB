@@ -68,4 +68,20 @@ export const Icons = {
   gitHub: IconBrandGithub,
   twitter: IconBrandTwitter,
   check: IconCheck,
+  // Detailed mapping for nav-config
+  workspace: IconFolder,
+  teams: IconUsers,
+  pro: IconCrown,
+  exclusive: IconStar,
+  account: IconUserCircle,
+  profile: IconUser,
+  billing: IconCreditCard,
+  // CRM icons
+  crm: IconLayoutDashboard,
+  leads: IconPhoto,
+  deals: IconShoppingBag,
+  contacts: IconUsers,
+  activities: IconFile,
+  emails: IconFileText,
+  crmSettings: IconSettings
 };

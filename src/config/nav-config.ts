@@ -49,6 +49,49 @@ export const navItems: NavItem[] = [
     items: []
   },
   {
+    title: 'CRM',
+    url: '#',
+    icon: 'crm',
+    isActive: true,
+    items: [
+      {
+        title: 'Dashboard',
+        url: '/dashboard/crm',
+        icon: 'dashboard'
+      },
+      {
+        title: 'Leads',
+        url: '/dashboard/crm/leads',
+        icon: 'leads'
+      },
+      {
+        title: 'Deals',
+        url: '/dashboard/crm/deals',
+        icon: 'deals'
+      },
+      {
+        title: 'Contacts',
+        url: '/dashboard/crm/contacts/persons',
+        icon: 'contacts'
+      },
+      {
+        title: 'Activities',
+        url: '/dashboard/crm/activities',
+        icon: 'activities'
+      },
+      {
+        title: 'Emails',
+        url: '/dashboard/crm/emails',
+        icon: 'emails'
+      },
+      {
+        title: 'Settings',
+        url: '/dashboard/crm/settings',
+        icon: 'crmSettings'
+      }
+    ]
+  },
+  {
     title: 'Teams',
     url: '/dashboard/workspaces/team',
     icon: 'teams',

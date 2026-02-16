@@ -1,103 +1,61 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireRole } from '@/lib/auth/get-session';
-import prisma from '@/lib/db/prisma';
-import { TenantAuthSettings, DEFAULT_AUTH_SETTINGS } from '@/features/settings/types';
+import { NextRequest } from 'next/server';
+import { withRole } from '@/lib/auth/get-current-user';
+import { apiResponse, handleApiError } from '@/lib/api/response';
+import {
+  TenantSettingsService,
+  TenantAuthSettingsSchema
+} from '@/lib/services/tenant-settings-service';
+import { ValidationError } from '@/lib/errors/app-errors';
 
 /**
  * GET /api/settings/tenant/auth
  * Get tenant auth settings.
  * Requires ADMIN role.
+ *
+ * Best Practice: Use service layer for business logic separation
  */
 export async function GET(request: NextRequest) {
-    try {
-        const session = await requireRole(request, 'ADMIN');
+  try {
+    return await withRole(request, ['ADMIN'], async (user) => {
+      const settingsService = new TenantSettingsService(user.tenantId, user.id);
 
-        const tenant = await prisma.tenant.findUnique({
-            where: { id: session.tenantId },
-            select: { settings: true },
-        });
+      const authSettings = await settingsService.getAuthSettings();
 
-        if (!tenant) {
-            return NextResponse.json({ error: 'Tenant not found' }, { status: 404 });
-        }
-
-        const settings = tenant.settings as any;
-        const authSettings: TenantAuthSettings = {
-            ...DEFAULT_AUTH_SETTINGS,
-            ...(settings.auth || {}),
-        };
-
-        return NextResponse.json(authSettings);
-    } catch (error: any) {
-        if (error.message.startsWith('Unauthorized')) {
-            return NextResponse.json({ error: error.message }, { status: 401 });
-        }
-        if (error.message.startsWith('Forbidden')) {
-            return NextResponse.json({ error: error.message }, { status: 403 });
-        }
-        console.error('Error fetching auth settings:', error);
-        return NextResponse.json(
-            { error: 'Internal Server Error' },
-            { status: 500 }
-        );
-    }
+      return apiResponse(authSettings);
+    });
+  } catch (error) {
+    return handleApiError(error);
+  }
 }
 
 /**
  * PUT /api/settings/tenant/auth
  * Update tenant auth settings.
  * Requires ADMIN role.
+ * Context7: Use safeParse for structured validation errors
  */
 export async function PUT(request: NextRequest) {
-    try {
-        const session = await requireRole(request, 'ADMIN');
-        const body: Partial<TenantAuthSettings> = await request.json();
+  try {
+    return await withRole(request, ['ADMIN'], async (user) => {
+      const settingsService = new TenantSettingsService(user.tenantId, user.id);
 
-        // Fetch current settings to merge
-        const tenant = await prisma.tenant.findUnique({
-            where: { id: session.tenantId },
-            select: { settings: true },
-        });
+      const body = await request.json();
+      const validation = TenantAuthSettingsSchema.safeParse(body);
 
-        if (!tenant) {
-            return NextResponse.json({ error: 'Tenant not found' }, { status: 404 });
-        }
-
-        const currentSettings = tenant.settings as any;
-        const currentAuth = currentSettings.auth || {};
-
-        // Validate inputs (basic)
-        if (body.passwordMinLength && body.passwordMinLength < 6) {
-            return NextResponse.json({ error: 'Password length must be at least 6' }, { status: 400 });
-        }
-
-        // Merge new settings
-        const newSettings = {
-            ...currentSettings,
-            auth: {
-                ...DEFAULT_AUTH_SETTINGS,
-                ...currentAuth,
-                ...body,
-            },
-        };
-
-        const updatedTenant = await prisma.tenant.update({
-            where: { id: session.tenantId },
-            data: { settings: newSettings },
-        });
-
-        return NextResponse.json(newSettings.auth);
-    } catch (error: any) {
-        if (error.message.startsWith('Unauthorized')) {
-            return NextResponse.json({ error: error.message }, { status: 401 });
-        }
-        if (error.message.startsWith('Forbidden')) {
-            return NextResponse.json({ error: error.message }, { status: 403 });
-        }
-        console.error('Error updating auth settings:', error);
-        return NextResponse.json(
-            { error: 'Internal Server Error' },
-            { status: 500 }
+      if (!validation.success) {
+        throw new ValidationError(
+          'Validation failed',
+          validation.error.flatten().fieldErrors
         );
-    }
+      }
+
+      const updatedSettings = await settingsService.updateAuthSettings(
+        validation.data
+      );
+
+      return apiResponse(updatedSettings);
+    });
+  } catch (error) {
+    return handleApiError(error);
+  }
 }
