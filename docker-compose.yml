@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -24,6 +22,28 @@ services:
     volumes:
       - redis_data:/data
 
+  # SuperTokens Core - Self-hosted authentication service
+  supertokens:
+    image: supertokens/supertokens-postgresql:latest
+    ports:
+      - "3567:3567"
+    environment:
+      POSTGRESQL_CONNECTION_URI: "postgresql://postgres:postgres@postgres:5432/supertokens"
+      API_KEYS: "${SUPERTOKENS_API_KEY:-}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3567/hello" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ──────────────────────────────────────────────────
+  # Вспомогательные сервисы (запускайте по необходимости)
+  # docker-compose up -d minio n8n
+  # ──────────────────────────────────────────────────
+
   minio:
     image: minio/minio
     ports:
@@ -35,6 +55,8 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
+    profiles:
+      - tools
 
   n8n:
     image: n8nio/n8n
@@ -55,26 +77,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-
-  # SuperTokens Core - Self-hosted authentication service
-  supertokens:
-    image: supertokens/supertokens-postgresql:latest
-    ports:
-      - "3567:3567"
-    environment:
-      POSTGRESQL_CONNECTION_URI: "postgresql://postgres:postgres@postgres:5432/supertokens"
-      # SECURITY: API key protects SuperTokens Core from unauthorized access.
-      # Must match SUPERTOKENS_API_KEY in .env / .env.local
-      # Generate with: openssl rand -hex 32
-      API_KEYS: "${SUPERTOKENS_API_KEY:-}"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:3567/hello" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    profiles:
+      - tools
 
 volumes:
   postgres_data:

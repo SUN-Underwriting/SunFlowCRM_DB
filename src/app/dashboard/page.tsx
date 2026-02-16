@@ -1,17 +1,18 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
-import { useSessionContext } from 'supertokens-auth-react/recipe/session';
+import { useEffect, Suspense } from 'react';
+import { getAuthClientAdapter } from '@/lib/auth/providers/client-factory';
 
-export default function Dashboard() {
+function DashboardRedirect() {
   const router = useRouter();
-  const session = useSessionContext();
+  const adapter = getAuthClientAdapter();
+  const session = adapter.useSession();
 
   useEffect(() => {
     if (session.loading) return;
 
-    if (session.doesSessionExist) {
+    if (session.authenticated) {
       router.replace('/dashboard/overview');
     } else {
       router.replace('/auth/sign-in');
@@ -22,5 +23,19 @@ export default function Dashboard() {
     <div className='flex h-screen items-center justify-center'>
       <p className='text-muted-foreground'>Loading...</p>
     </div>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <Suspense
+      fallback={
+        <div className='flex h-screen items-center justify-center'>
+          <p className='text-muted-foreground'>Loading...</p>
+        </div>
+      }
+    >
+      <DashboardRedirect />
+    </Suspense>
   );
 }

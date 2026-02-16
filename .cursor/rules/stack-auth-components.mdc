@@ -1,0 +1,56 @@
+---
+description: Stack Auth built-in components, environment variables, and common pitfalls
+globs: src/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Stack Auth — components & configuration
+
+## Built-in components
+
+Available from `@stackframe/stack`:
+
+```tsx
+<SignIn />
+<SignUp />
+<UserButton />
+<OAuthButtonGroup />
+<CredentialSignIn />
+<StackHandler />
+```
+
+**Requirement:** All Stack components require `StackProvider` + `StackTheme` in the React tree.
+
+## Environment Variables
+
+```bash
+# Stack Auth (self-hosted)
+NEXT_PUBLIC_STACK_PROJECT_ID=...
+NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY=...  # (new docs: NEXT_PUBLIC_STACK_PUBLISHABLE_KEY)
+STACK_SECRET_SERVER_KEY=...                   # (new docs: STACK_SECRET_KEY) NEVER in client code!
+NEXT_PUBLIC_STACK_API_URL=http://localhost:8102
+
+# Provider selection
+AUTH_PROVIDER=stack
+NEXT_PUBLIC_AUTH_PROVIDER=stack
+```
+
+The SDK supports both old and new env var names (backward-compatible).
+
+## Cookie names (debugging)
+
+Stack Auth SDK использует:
+Stack Auth SDK uses:
+- `stack-access` — access token (fixed name)
+- `stack-refresh-{projectId}` — refresh token
+- `stack-refresh` — legacy fallback
+
+❌ Do NOT use `stack-refresh-token` or `stack-access-token` — those names do not exist in the SDK.
+
+## Common pitfalls
+
+❌ `new StackClientApp(...)` / `new StackServerApp(...)` — use `getStack*App()`  
+❌ `useUser()` in a Server Component — use `getUser()` instead  
+❌ `useUser()` outside `StackProvider` — runtime error  
+❌ `<StackHandler {...props} />` — pass `routeProps={props}`  
+❌ Removing `StackTheme` — built-in components break

@@ -1,22 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureSuperTokensInit } from '@/lib/supertokens/config';
-import { getAppDirRequestHandler } from 'supertokens-node/nextjs';
-
-ensureSuperTokensInit();
+import { getAuthAdapter } from '@/lib/auth/providers/factory';
 
 /**
- * SuperTokens API route handler for /api/auth/*
- * Handles all authentication endpoints (signin, signup, signout, session refresh, etc.)
+ * Auth API route handler for /api/auth/*
+ * Handles all authentication endpoints via the configured auth provider.
+ * Supports both SuperTokens and Stack Auth depending on AUTH_PROVIDER env variable.
  *
- * Context7: Based on SuperTokens Next.js App Router documentation
- * - Must return response from getAppDirRequestHandler
- * - GET requests require Cache-Control header to prevent Vercel caching issues
+ * Uses lazy initialization to avoid loading Stack Auth when SuperTokens is active.
  */
-const handleCall = getAppDirRequestHandler();
+let handleCall: ((request: NextRequest) => Promise<NextResponse>) | null = null;
+
+async function getHandler() {
+  if (!handleCall) {
+    const authAdapter = await getAuthAdapter();
+    handleCall = authAdapter.getApiHandler();
+  }
+  return handleCall;
+}
 
 export async function GET(request: NextRequest) {
-  const res = await handleCall(request);
-  // Context7: Critical for production - prevent caching of auth endpoints
+  const handler = await getHandler();
+  const res = await handler(request);
+  // Critical for production - prevent caching of auth endpoints
   if (!res.headers.has('Cache-Control')) {
     res.headers.set(
       'Cache-Control',
@@ -27,21 +32,26 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  return handleCall(request);
+  const handler = await getHandler();
+  return handler(request);
 }
 
 export async function DELETE(request: NextRequest) {
-  return handleCall(request);
+  const handler = await getHandler();
+  return handler(request);
 }
 
 export async function PUT(request: NextRequest) {
-  return handleCall(request);
+  const handler = await getHandler();
+  return handler(request);
 }
 
 export async function PATCH(request: NextRequest) {
-  return handleCall(request);
+  const handler = await getHandler();
+  return handler(request);
 }
 
 export async function HEAD(request: NextRequest) {
-  return handleCall(request);
+  const handler = await getHandler();
+  return handler(request);
 }

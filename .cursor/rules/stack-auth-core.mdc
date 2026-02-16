@@ -1,0 +1,43 @@
+---
+description: Stack Auth core architecture and adapter pattern for Sun MGA platform
+globs: src/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Stack Auth — architecture & adapters (core)
+
+This project uses Stack Auth (self-hosted) via an adapter pattern.
+Docs: https://docs.stack-auth.com
+
+## Architecture
+
+```
+src/stack/client.ts                      — getStackClientApp()
+src/stack/server.ts                      — getStackServerApp()
+src/lib/auth/providers/stack/*-adapter.* — Stack integration layer
+src/app/handler/[...stack]/page.tsx      — <StackHandler />
+src/app/loading.tsx                      — global loading boundary (Stack best practice)
+```
+
+## Usage rules
+
+### Forbidden (to avoid breakage)
+
+- ❌ **Do not create** `new StackClientApp(...)` / `new StackServerApp(...)` in app code  
+  Use `getStackClientApp()` / `getStackServerApp()`.
+- ❌ **Do not implement auth/session in API routes via Stack SDK directly** — only via our adapters/helpers.
+
+### Allowed (and required)
+
+- ✅ **UI layer** (`src/app/**`, `src/features/auth/**`): use Stack components/hooks per docs  
+  (`useUser`, `useStackApp`, `<OAuthButtonGroup />`, `<SignIn />`, etc.)
+- ✅ **Server/API layer**: use our adapters/helpers:
+  - client: `getAuthClientAdapter()` from `src/lib/auth/providers/client-factory.tsx`
+  - server: `getAuthAdapter()` from `src/lib/auth/providers/factory.ts`
+
+## Required wrappers (UI)
+
+**CRITICAL:** `StackProvider` + `StackTheme` must exist in the tree (we add them in `client-adapter.tsx`).  
+shadcn `TooltipProvider` must also exist (we add it in `providers.tsx`) or Stack tooltips will crash.
+
+❌ **Do not remove** `StackTheme` from the provider — built-in Stack components will break.

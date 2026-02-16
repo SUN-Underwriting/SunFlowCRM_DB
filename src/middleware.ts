@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { hasValidSessionCookie } from '@/lib/auth/middleware-utils';
 
 /**
  * Protected route prefixes that require authentication.
@@ -14,7 +15,14 @@ const PROTECTED_PREFIXES = ['/dashboard', '/settings'];
 /**
  * Routes that should never be protected (auth pages, public pages).
  */
-const PUBLIC_PREFIXES = ['/auth', '/api/auth', '/_next', '/monitoring'];
+const PUBLIC_PREFIXES = [
+  '/auth',
+  '/api/auth',
+  '/api/webhooks',
+  '/handler',
+  '/_next',
+  '/monitoring'
+];
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
@@ -24,6 +32,10 @@ function isProtected(pathname: string): boolean {
   return PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
+/**
+ * Next.js middleware for route protection.
+ * Optimized for Edge Runtime with minimal imports.
+ */
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -32,14 +44,10 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // For protected routes, check if a SuperTokens session cookie exists.
-  // SuperTokens uses "sAccessToken" for cookie-based sessions.
+  // For protected routes, check if a session cookie exists.
+  // This is a fast cookie-presence check without heavy adapter instantiation.
   if (isProtected(pathname)) {
-    const accessToken =
-      request.cookies.get('sAccessToken')?.value ||
-      request.cookies.get('st-access-token')?.value;
-
-    if (!accessToken) {
+    if (!hasValidSessionCookie(request)) {
       const signInUrl = new URL('/auth/sign-in', request.url);
       // Preserve the intended destination so we can redirect after login
       signInUrl.searchParams.set('redirectToPath', pathname);

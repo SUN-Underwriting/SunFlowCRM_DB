@@ -52,6 +52,19 @@ export function PipelineFormDialog({
 }: PipelineFormDialogProps) {
   const queryClient = useQueryClient();
 
+  const handleAuthAwareError = (error: unknown, fallbackMessage: string) => {
+    const status = (error as any)?.status;
+    if (status === 401) {
+      toast.error('Session expired. Please sign in again.');
+      if (typeof window !== 'undefined') {
+        const redirectToPath = encodeURIComponent(window.location.pathname);
+        window.location.href = `/auth/sign-in?redirectToPath=${redirectToPath}`;
+      }
+      return;
+    }
+    toast.error(fallbackMessage);
+  };
+
   const form = useForm<PipelineFormValues>({
     resolver: zodResolver(pipelineFormSchema),
     defaultValues: {
@@ -85,8 +98,8 @@ export function PipelineFormDialog({
       toast.success('Pipeline created successfully');
       onOpenChange(false);
     },
-    onError: () => {
-      toast.error('Failed to create pipeline');
+    onError: (error) => {
+      handleAuthAwareError(error, 'Failed to create pipeline');
     }
   });
 
@@ -100,16 +113,21 @@ export function PipelineFormDialog({
       toast.success('Pipeline updated successfully');
       onOpenChange(false);
     },
-    onError: () => {
-      toast.error('Failed to update pipeline');
+    onError: (error) => {
+      handleAuthAwareError(error, 'Failed to update pipeline');
     }
   });
 
   const onSubmit = async (values: PipelineFormValues) => {
-    if (pipeline) {
-      await updatePipeline.mutateAsync(values);
-    } else {
-      await createPipeline.mutateAsync(values);
+    try {
+      if (pipeline) {
+        await updatePipeline.mutateAsync(values);
+      } else {
+        await createPipeline.mutateAsync(values);
+      }
+    } catch {
+      // Errors are handled by React Query onError callbacks.
+      // Prevent unhandled promise rejections from bubbling to the Next.js runtime overlay.
     }
   };
 

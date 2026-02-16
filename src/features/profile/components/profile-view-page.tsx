@@ -1,17 +1,24 @@
 'use client';
 
-import { useSessionContext } from 'supertokens-auth-react/recipe/session';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { getAuthClientAdapter } from '@/lib/auth/providers/client-factory';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle
+} from '@/components/ui/card';
 
 export default function ProfileViewPage() {
-  const session = useSessionContext();
+  const adapter = getAuthClientAdapter();
+  const session = adapter.useSession();
 
   if (session.loading) {
     return <div className='flex w-full flex-col p-4'>Loading...</div>;
   }
 
-  const userEmail = session.accessTokenPayload?.email || 'user@example.com';
-  const userName = session.accessTokenPayload?.name || userEmail.split('@')[0];
+  const userEmail = session.user?.email || 'user@example.com';
+  const userName = session.user?.name || userEmail.split('@')[0];
 
   return (
     <div className='flex w-full flex-col gap-4 p-4'>
@@ -31,8 +38,8 @@ export default function ProfileViewPage() {
           </div>
           <div>
             <label className='text-sm font-medium'>User ID</label>
-            <p className='text-muted-foreground text-sm font-mono text-xs'>
-              {session.userId}
+            <p className='text-muted-foreground font-mono text-sm text-xs'>
+              {session.user?.id || '—'}
             </p>
           </div>
         </CardContent>

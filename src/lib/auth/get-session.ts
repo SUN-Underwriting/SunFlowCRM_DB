@@ -1,53 +1,17 @@
-import { withSession } from 'supertokens-node/nextjs';
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureSuperTokensInit } from '@/lib/supertokens/config';
 import { runInRequestContext } from '@/lib/db/rls-context';
 import {
   UnauthorizedError,
   TenantContextMissingError,
   ForbiddenError
 } from '@/lib/errors/app-errors';
-import type { SessionContainer } from 'supertokens-node/recipe/session';
-
-// Ensure SuperTokens is initialized
-ensureSuperTokensInit();
+import { getAuthAdapter } from '@/lib/auth/providers/factory';
 
 /**
- * Session payload extracted from SuperTokens access token.
- * Contains user info including tenantId and roles for RBAC.
+ * Re-export SessionPayload from types for backward compatibility.
+ * Avoid importing from this file - prefer importing from @/lib/auth/providers/types
  */
-export interface SessionPayload {
-  userId: string;
-  tenantId: string;
-  roles: string[];
-  email?: string;
-}
-
-/**
- * Extract session payload from SuperTokens SessionContainer.
- * Helper to reduce code duplication.
- */
-function extractSessionPayload(session: SessionContainer): SessionPayload {
-  const payload = session.getAccessTokenPayload();
-
-  // Critical: Enforce tenantId presence
-  if (!payload.tenantId) {
-    console.error('[Auth] SECURITY: Session missing tenantId:', {
-      userId: session.getUserId(),
-      email: payload.email
-    });
-    throw new TenantContextMissingError(
-      'Invalid session: missing tenant context'
-    );
-  }
-
-  return {
-    userId: session.getUserId(),
-    tenantId: payload.tenantId,
-    roles: Array.isArray(payload.roles) ? payload.roles : [],
-    email: payload.email
-  };
-}
+export type { SessionPayload } from '@/lib/auth/providers/types';
 
 /**
  * Get session payload without setting up RLS context.
@@ -56,28 +20,13 @@ function extractSessionPayload(session: SessionContainer): SessionPayload {
 export async function getSessionPayload(
   request: NextRequest
 ): Promise<SessionPayload | null> {
-  return new Promise((resolve) => {
-    withSession(request, async (err, session) => {
-      if (err || !session) {
-        resolve(null);
-        return NextResponse.json({ error: 'No session' }, { status: 401 });
-      }
-
-      try {
-        resolve(extractSessionPayload(session));
-      } catch (error) {
-        console.error('[Auth] getSessionPayload error:', error);
-        resolve(null);
-      }
-
-      return NextResponse.json({ ok: true });
-    });
-  });
+  const authAdapter = await getAuthAdapter();
+  return authAdapter.getSession(request);
 }
 
 /**
  * Run a handler within a properly isolated async RLS context.
- * Uses SuperTokens' withSession helper for proper cookie handling.
+ * Works with any auth provider via the adapter pattern.
  *
  * This uses AsyncLocalStorage.run() (NOT enterWith()) to ensure
  * the tenant context is correctly scoped to this request only,
@@ -96,29 +45,33 @@ export async function withSessionContext(
   request: NextRequest,
   handler: (session: SessionPayload) => Promise<NextResponse>
 ): Promise<NextResponse> {
-  return withSession(request, async (err, session) => {
-    // Handle SuperTokens errors
-    if (err) {
-      console.error('[Auth] SuperTokens session error:', err);
-      throw new UnauthorizedError('Session error');
-    }
+  const authAdapter = await getAuthAdapter();
+  const session = await authAdapter.getSession(request);
 
-    // No session exists
-    if (!session) {
-      throw new UnauthorizedError('No valid session');
-    }
+  // No session exists
+  if (!session) {
+    throw new UnauthorizedError('No valid session');
+  }
 
-    const sessionPayload = extractSessionPayload(session);
-
-    // Run handler within RLS context
-    return runInRequestContext(
-      {
-        tenantId: sessionPayload.tenantId,
-        userId: sessionPayload.userId
-      },
-      () => handler(sessionPayload)
+  // Validate tenant context
+  if (!session.tenantId) {
+    console.error('[Auth] SECURITY: Session missing tenantId:', {
+      userId: session.userId,
+      email: session.email
+    });
+    throw new TenantContextMissingError(
+      'Invalid session: missing tenant context'
     );
-  });
+  }
+
+  // Run handler within RLS context
+  return runInRequestContext(
+    {
+      tenantId: session.tenantId,
+      userId: session.userId
+    },
+    () => handler(session)
+  );
 }
 
 /**

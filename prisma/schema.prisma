@@ -54,8 +54,9 @@ enum TenantStatus {
 }
 
 model User {
-  id                String @id @default(cuid())
-  supertokensUserId String @unique
+  id                String  @id @default(cuid())
+  supertokensUserId String? @unique // Made nullable to support Stack Auth users
+  stackAuthUserId   String? @unique // Stack Auth user ID (for multi-provider support)
   tenantId          String
 
   email     String // Changed from @unique to allow same email in different tenants
@@ -86,6 +87,7 @@ model User {
   @@unique([email, tenantId], name: "user_email_tenant_unique")
   @@index([tenantId])
   @@index([supertokensUserId])
+  @@index([stackAuthUserId])
   @@map("users")
 }
 

@@ -1,9 +1,14 @@
 'use client';
 import React, { useState } from 'react';
 import { ActiveThemeProvider } from '../themes/active-theme';
-import { SuperTokensProvider } from '../auth/supertokens-provider';
+import { getAuthClientAdapter } from '@/lib/auth/providers/client-factory';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
+
+// Get the configured auth provider
+const authAdapter = getAuthClientAdapter();
+const AuthProvider = authAdapter.Provider;
 
 export default function Providers({
   activeThemeValue,
@@ -45,11 +50,11 @@ export default function Providers({
 
   return (
     <ActiveThemeProvider initialTheme={activeThemeValue}>
-      <SuperTokensProvider>
+      <AuthProvider>
         <QueryClientProvider client={queryClient}>
-          {children}
+          <TooltipProvider delayDuration={0}>{children}</TooltipProvider>
         </QueryClientProvider>
-      </SuperTokensProvider>
+      </AuthProvider>
     </ActiveThemeProvider>
   );
 }

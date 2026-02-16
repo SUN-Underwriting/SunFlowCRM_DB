@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useQueryStates, parseAsString, parseAsArrayOf } from 'nuqs';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -19,6 +20,7 @@ import {
 } from '@/components/ui/select';
 import { IconPlus } from '@tabler/icons-react';
 import { PipelineBoard } from '@/features/crm/deals/components/pipeline-board';
+import { DealsBoardToolbar } from '@/features/crm/deals/components/deals-board-toolbar';
 import { CreateDealDialogEnhanced } from '@/features/crm/deals/components/create-deal-dialog-enhanced';
 import { DealDetailSheet } from '@/features/crm/deals/components/deal-detail-sheet';
 import {
@@ -26,6 +28,7 @@ import {
   useMoveDeal
 } from '@/features/crm/deals/hooks/use-deals';
 import { pipelinesApi } from '@/lib/api/crm-client';
+import { useDebounce } from '@/hooks/use-debounce';
 import type {
   DealWithRelations,
   StageWithRelations
@@ -38,6 +41,7 @@ import type {
  * - React Query for data fetching and cache management
  * - Optimistic drag & drop updates via useMoveDeal
  * - Pipeline selector with auto-select default
+ * - URL-synced filters (nuqs) for shareable links
  * - Loading and error states
  */
 export default function DealsPage() {
@@ -46,19 +50,27 @@ export default function DealsPage() {
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
 
+  // URL-synced filters (nuqs pattern)
+  const [filters] = useQueryStates({
+    q: parseAsString.withDefault(''),
+    owner: parseAsArrayOf(parseAsString).withDefault([]),
+    status: parseAsArrayOf(parseAsString).withDefault([])
+  });
+
+  const debouncedSearch = useDebounce(filters.q, 300);
+
   // Load pipelines
   const { data: pipelinesData, isLoading: loadingPipelines } = useQuery({
     queryKey: ['pipelines'],
     queryFn: async () => {
       const response = await pipelinesApi.list();
-      return response.data;
+      const raw = response.data.pipelines;
+      return Array.isArray(raw) ? raw : [];
     },
     staleTime: 60 * 1000 // 1 minute
   });
 
-  const pipelines = Array.isArray(pipelinesData?.pipelines)
-    ? pipelinesData.pipelines
-    : [];
+  const pipelines = pipelinesData || [];
   const selectedPipeline = pipelines.find((p) => p.id === selectedPipelineId);
 
   // Auto-select default pipeline on load
@@ -83,16 +95,68 @@ export default function DealsPage() {
     await moveDeal.mutateAsync({ id: dealId, stageId: newStageId });
   };
 
-  // Group deals by stage
+  // Filter deals based on URL params (client-side MVP)
+  const filteredDeals = useMemo(() => {
+    if (!dealsData?.deals) return [];
+
+    let result = dealsData.deals;
+
+    // Search by title, person name, or organization name
+    if (debouncedSearch) {
+      const query = debouncedSearch.toLowerCase();
+      result = result.filter((deal) => {
+        const titleMatch = deal.title?.toLowerCase().includes(query);
+        const personMatch =
+          deal.person?.firstName?.toLowerCase().includes(query) ||
+          deal.person?.lastName?.toLowerCase().includes(query);
+        const orgMatch = deal.organization?.name?.toLowerCase().includes(query);
+        return titleMatch || personMatch || orgMatch;
+      });
+    }
+
+    // Filter by owner
+    if (filters.owner.length > 0) {
+      result = result.filter((deal) =>
+        deal.ownerId ? filters.owner.includes(deal.ownerId) : false
+      );
+    }
+
+    // Filter by status
+    if (filters.status.length > 0) {
+      result = result.filter((deal) => filters.status.includes(deal.status));
+    }
+
+    return result;
+  }, [dealsData?.deals, debouncedSearch, filters.owner, filters.status]);
+
+  // Group filtered deals by stage
   const dealsByStage =
-    selectedPipeline && dealsData && selectedPipeline.stages
+    selectedPipeline && selectedPipeline.stages
       ? selectedPipeline.stages.map((stage: StageWithRelations) => ({
           stage,
-          deals: (dealsData.deals || []).filter(
+          deals: filteredDeals.filter(
             (deal: DealWithRelations) => deal.stageId === stage.id
           )
         }))
       : [];
+
+  // Extract unique owners for filter dropdown
+  const owners = useMemo(() => {
+    if (!dealsData?.deals) return [];
+    const uniqueOwners = new Map<string, { id: string; name: string }>();
+    dealsData.deals.forEach((deal) => {
+      if (deal.owner && deal.ownerId) {
+        uniqueOwners.set(deal.ownerId, {
+          id: deal.ownerId,
+          name:
+            `${deal.owner.firstName || ''} ${deal.owner.lastName || ''}`.trim() ||
+            deal.owner.email ||
+            'Unknown'
+        });
+      }
+    });
+    return Array.from(uniqueOwners.values());
+  }, [dealsData?.deals]);
 
   const isLoading = loadingPipelines || loadingDeals;
 
@@ -154,16 +218,34 @@ export default function DealsPage() {
                 : 'Select a pipeline to view deals'}
             </div>
           ) : (
-            <PipelineBoard
-              stages={selectedPipeline?.stages || []}
-              dealsByStage={dealsByStage}
-              onDealMove={handleDealMove}
-              onDealClick={(deal) => {
-                setSelectedDealId(deal.id);
-                setDetailSheetOpen(true);
-              }}
-              isLoading={isLoading}
-            />
+            <>
+              {/* Toolbar with search and filters */}
+              <DealsBoardToolbar
+                owners={owners}
+                statuses={['OPEN', 'WON', 'LOST']}
+              />
+
+              {/* Pipeline board */}
+              <PipelineBoard
+                stages={selectedPipeline?.stages || []}
+                dealsByStage={dealsByStage}
+                onDealMove={handleDealMove}
+                onDealClick={(deal) => {
+                  setSelectedDealId(deal.id);
+                  setDetailSheetOpen(true);
+                }}
+                isLoading={isLoading}
+              />
+
+              {/* Results info */}
+              {!isLoading &&
+                filteredDeals.length !== dealsData?.deals?.length && (
+                  <div className='text-muted-foreground mt-4 text-center text-sm'>
+                    Showing {filteredDeals.length} of{' '}
+                    {dealsData?.deals?.length || 0} deals
+                  </div>
+                )}
+            </>
           )}
         </CardContent>
       </Card>

@@ -11,29 +11,31 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { UserAvatarProfile } from '@/components/user-avatar-profile';
 import { useRouter } from 'next/navigation';
-import { useSessionContext } from 'supertokens-auth-react/recipe/session';
-import { signOut } from 'supertokens-web-js/recipe/session';
+import { getAuthClientAdapter } from '@/lib/auth/providers/client-factory';
+
+// Get the configured auth adapter
+const authAdapter = getAuthClientAdapter();
 
 export function UserNav() {
-  const session = useSessionContext();
+  const { user, loading, authenticated } = authAdapter.useSession();
   const router = useRouter();
 
   const handleSignOut = async () => {
-    await signOut();
+    await authAdapter.signOut();
     router.push('/auth/sign-in');
   };
 
-  if (session.loading) {
+  if (loading) {
     return null;
   }
 
-  if (!session.doesSessionExist) {
+  if (!authenticated || !user) {
     return null;
   }
 
-  // Get user email from session payload (added during session creation)
-  const userEmail = session.accessTokenPayload?.email || 'user@example.com';
-  const userName = session.accessTokenPayload?.name || userEmail.split('@')[0];
+  // Get user info from adapter
+  const userEmail = user.email || 'user@example.com';
+  const userName = user.name || userEmail.split('@')[0];
 
   return (
     <DropdownMenu>
@@ -50,9 +52,7 @@ export function UserNav() {
       >
         <DropdownMenuLabel className='font-normal'>
           <div className='flex flex-col space-y-1'>
-            <p className='text-sm leading-none font-medium'>
-              {userName}
-            </p>
+            <p className='text-sm leading-none font-medium'>{userName}</p>
             <p className='text-muted-foreground text-xs leading-none'>
               {userEmail}
             </p>
@@ -68,9 +68,7 @@ export function UserNav() {
           <DropdownMenuItem>New Team</DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={handleSignOut}>
-          Sign Out
-        </DropdownMenuItem>
+        <DropdownMenuItem onClick={handleSignOut}>Sign Out</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

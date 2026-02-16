@@ -1,0 +1,46 @@
+---
+description: Stack Auth patterns for pages - authentication, protection, and user access
+globs: src/app/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Stack Auth — building & protecting pages
+
+## Getting the current user
+
+### Client Component ('use client')
+```tsx
+import { useUser } from '@stackframe/stack';
+
+const user = useUser(); // null if not signed in
+useUser({ or: 'redirect' }); // protect the page (redirect to sign-in)
+```
+
+### Server Component
+```tsx
+import { getStackServerApp } from '@/stack/server';
+
+await getStackServerApp().getUser({ or: 'redirect' }); // protect the page
+```
+
+### API Route Handler (server)
+Use the project helper `withCurrentUser()` (do not use Stack SDK directly here).
+
+## Page protection
+
+**Security rule:** Every page that contains sensitive data must protect itself,
+not only rely on a layout or middleware.
+
+1. **Client Component:** call `useUser({ or: 'redirect' })` at the top
+2. **Server Component:** call `await getStackServerApp().getUser({ or: 'redirect' })` at the top
+3. **Middleware:** already configured for `/dashboard` and `/settings`
+
+For a new protected path outside `/dashboard`/`/settings`,
+add it to `PROTECTED_PREFIXES` in `src/middleware.ts`.
+
+## Sign Out
+```tsx
+const user = useUser();
+await user.signOut();
+// Or: window.location.href = '/handler/sign-out';
+```

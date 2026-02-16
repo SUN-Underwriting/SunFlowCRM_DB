@@ -32,8 +32,7 @@ import { UserAvatarProfile } from '@/components/user-avatar-profile';
 import { navItems } from '@/config/nav-config';
 import { useMediaQuery } from '@/hooks/use-media-query';
 import { useFilteredNavItems } from '@/hooks/use-nav';
-import { useSessionContext } from 'supertokens-auth-react/recipe/session';
-import { signOut } from 'supertokens-web-js/recipe/session';
+import { getAuthClientAdapter } from '@/lib/auth/providers/client-factory';
 import {
   IconAdjustments,
   IconBell,
@@ -53,22 +52,18 @@ import { OrgSwitcher } from '../org-switcher';
 export default function AppSidebar() {
   const pathname = usePathname();
   const { isOpen } = useMediaQuery();
-  const session = useSessionContext();
+  const adapter = getAuthClientAdapter();
+  const session = adapter.useSession();
   const router = useRouter();
   const filteredItems = useFilteredNavItems(navItems);
 
   const handleSignOut = async () => {
-    await signOut();
+    await adapter.signOut();
     router.push('/auth/sign-in');
   };
 
-  // Extract user info from session payload (email added during session creation)
-  const userEmail = (!session.loading && session.doesSessionExist)
-    ? (session.accessTokenPayload?.email as string || 'user@example.com')
-    : 'user@example.com';
-  const userName = (!session.loading && session.doesSessionExist)
-    ? (session.accessTokenPayload?.name as string || userEmail.split('@')[0])
-    : userEmail.split('@')[0];
+  const userEmail = session.user?.email || 'user@example.com';
+  const userName = session.user?.name || userEmail.split('@')[0];
 
   React.useEffect(() => {
     // Side effects based on sidebar state changes

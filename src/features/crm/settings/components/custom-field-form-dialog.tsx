@@ -89,6 +89,19 @@ export function CustomFieldFormDialog({
 }: CustomFieldFormDialogProps) {
   const queryClient = useQueryClient();
 
+  const handleAuthAwareError = (error: unknown, fallbackMessage: string) => {
+    const status = (error as any)?.status;
+    if (status === 401) {
+      toast.error('Session expired. Please sign in again.');
+      if (typeof window !== 'undefined') {
+        const redirectToPath = encodeURIComponent(window.location.pathname);
+        window.location.href = `/auth/sign-in?redirectToPath=${redirectToPath}`;
+      }
+      return;
+    }
+    toast.error(fallbackMessage);
+  };
+
   const form = useForm<CustomFieldFormValues>({
     resolver: zodResolver(customFieldFormSchema) as any,
     defaultValues: {
@@ -154,8 +167,8 @@ export function CustomFieldFormDialog({
       toast.success('Custom field created successfully');
       onOpenChange(false);
     },
-    onError: () => {
-      toast.error('Failed to create custom field');
+    onError: (error) => {
+      handleAuthAwareError(error, 'Failed to create custom field');
     }
   });
 
@@ -180,16 +193,20 @@ export function CustomFieldFormDialog({
       toast.success('Custom field updated successfully');
       onOpenChange(false);
     },
-    onError: () => {
-      toast.error('Failed to update custom field');
+    onError: (error) => {
+      handleAuthAwareError(error, 'Failed to update custom field');
     }
   });
 
   const onSubmit = async (values: CustomFieldFormValues) => {
-    if (field) {
-      await updateField.mutateAsync(values);
-    } else {
-      await createField.mutateAsync(values);
+    try {
+      if (field) {
+        await updateField.mutateAsync(values);
+      } else {
+        await createField.mutateAsync(values);
+      }
+    } catch {
+      // Handled by onError; prevent runtime overlay.
     }
   };
 

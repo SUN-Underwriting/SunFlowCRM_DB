@@ -56,6 +56,19 @@ export function StageFormDialog({
 }: StageFormDialogProps) {
   const queryClient = useQueryClient();
 
+  const handleAuthAwareError = (error: unknown, fallbackMessage: string) => {
+    const status = (error as any)?.status;
+    if (status === 401) {
+      toast.error('Session expired. Please sign in again.');
+      if (typeof window !== 'undefined') {
+        const redirectToPath = encodeURIComponent(window.location.pathname);
+        window.location.href = `/auth/sign-in?redirectToPath=${redirectToPath}`;
+      }
+      return;
+    }
+    toast.error(fallbackMessage);
+  };
+
   const form = useForm<StageFormValues>({
     resolver: zodResolver(stageFormSchema),
     defaultValues: {
@@ -121,8 +134,8 @@ export function StageFormDialog({
       toast.success('Stage created successfully');
       onOpenChange(false);
     },
-    onError: () => {
-      toast.error('Failed to create stage');
+    onError: (error) => {
+      handleAuthAwareError(error, 'Failed to create stage');
     }
   });
 
@@ -141,16 +154,20 @@ export function StageFormDialog({
       toast.success('Stage updated successfully');
       onOpenChange(false);
     },
-    onError: () => {
-      toast.error('Failed to update stage');
+    onError: (error) => {
+      handleAuthAwareError(error, 'Failed to update stage');
     }
   });
 
   const onSubmit = async (values: StageFormValues) => {
-    if (stage) {
-      await updateStage.mutateAsync(values);
-    } else {
-      await createStage.mutateAsync(values);
+    try {
+      if (stage) {
+        await updateStage.mutateAsync(values);
+      } else {
+        await createStage.mutateAsync(values);
+      }
+    } catch {
+      // Handled by onError; prevent runtime overlay.
     }
   };
 

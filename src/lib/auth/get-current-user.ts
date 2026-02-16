@@ -6,6 +6,7 @@ import {
   type SessionPayload
 } from '@/lib/auth/get-session';
 import { NotFoundError, ForbiddenError } from '@/lib/errors/app-errors';
+import { getAuthProviderType } from '@/lib/auth/providers/factory';
 
 /** Return shape for getCurrentUser — user info with tenant details */
 export interface CurrentUser {
@@ -26,10 +27,18 @@ export interface CurrentUser {
 /**
  * Resolve full user record from session payload.
  * Must be called inside an active RLS context (e.g. within withSessionContext).
+ *
+ * Automatically detects the auth provider and queries by the correct user ID field.
  */
 async function resolveUser(session: SessionPayload): Promise<CurrentUser> {
+  const authProvider = getAuthProviderType();
+
+  // Query by the correct field based on auth provider
   const user = await prisma.user.findUnique({
-    where: { supertokensUserId: session.userId },
+    where:
+      authProvider === 'stack'
+        ? { stackAuthUserId: session.userId }
+        : { supertokensUserId: session.userId },
     include: { tenant: true }
   });
 
@@ -133,9 +142,15 @@ export async function getCurrentUserOrNull(
     const session = await getSessionPayload(request);
     if (!session) return null;
 
+    const authProvider = getAuthProviderType();
+
     // Resolve user without RLS context (just a direct query)
+    // Query by the correct field based on auth provider
     const user = await prisma.user.findUnique({
-      where: { supertokensUserId: session.userId },
+      where:
+        authProvider === 'stack'
+          ? { stackAuthUserId: session.userId }
+          : { supertokensUserId: session.userId },
       include: { tenant: true }
     });
 

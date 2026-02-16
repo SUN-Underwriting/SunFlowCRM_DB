@@ -73,22 +73,44 @@ export class UserService extends BaseService {
   }
 
   /**
-   * Invite a new user to the tenant
-   * Creates user record with INVITED status and placeholder SuperTokens ID
-   * Context7: Wrap check-then-create in transaction to prevent race condition
+   * Invite/provision a new user to the tenant.
+   *
+   * For Stack Auth: creates user in Stack Auth + our DB via UserProvisioningService.
+   * For SuperTokens: creates a placeholder (invite flow, reconciled at sign-up).
    */
   async inviteUser(input: CreateUserInput) {
-    // Create invited user with placeholder SuperTokens ID
-    // invite-reconciliation.ts will update this when user signs up
+    const { getAuthProviderType } = await import(
+      '@/lib/auth/providers/factory'
+    );
+    const provider = getAuthProviderType();
+
+    if (provider === 'stack') {
+      // Full provisioning: Stack Auth + Prisma
+      const { UserProvisioningService } = await import(
+        '@/lib/services/user-provisioning-service'
+      );
+
+      const result = await UserProvisioningService.provisionUser(
+        {
+          email: input.email,
+          firstName: input.firstName,
+          lastName: input.lastName,
+          role: input.role,
+          tenantId: this.tenantId
+        },
+        this.userId
+      );
+
+      // Return compatible shape
+      return await prisma.user.findUnique({ where: { id: result.user.id } });
+    }
+
+    // SuperTokens: placeholder invite flow
     const placeholderId = `invite:${uuidv4()}`;
 
     const newUser = await prisma.$transaction(async (tx) => {
-      // Check if user already exists in this tenant
       const existingUser = await tx.user.findFirst({
-        where: {
-          email: input.email,
-          tenantId: this.tenantId
-        }
+        where: { email: input.email, tenantId: this.tenantId }
       });
 
       if (existingUser) {
@@ -107,9 +129,6 @@ export class UserService extends BaseService {
         }
       });
     });
-
-    // TODO: Trigger invitation email
-    // await emailService.sendInvitation(newUser.email, this.tenantId);
 
     // Audit: user invited
     await AuditService.log({

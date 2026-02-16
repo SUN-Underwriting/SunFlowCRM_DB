@@ -1,26 +1,41 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
-import { useSessionContext } from 'supertokens-auth-react/recipe/session';
+import { useEffect, Suspense } from 'react';
+import { getAuthClientAdapter } from '@/lib/auth/providers/client-factory';
 
-export default function Page() {
+function HomeRedirect() {
   const router = useRouter();
-  const session = useSessionContext();
+  const authAdapter = getAuthClientAdapter();
+  const { user, loading } = authAdapter.useSession();
 
   useEffect(() => {
-    if (session.loading) return;
+    if (loading) return;
 
-    if (session.doesSessionExist) {
+    if (user) {
       router.replace('/dashboard/overview');
     } else {
       router.replace('/auth/sign-in');
     }
-  }, [session, router]);
+  }, [user, loading, router]);
 
   return (
     <div className='flex h-screen items-center justify-center'>
       <p className='text-muted-foreground'>Loading...</p>
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense
+      fallback={
+        <div className='flex h-screen items-center justify-center'>
+          <p className='text-muted-foreground'>Loading...</p>
+        </div>
+      }
+    >
+      <HomeRedirect />
+    </Suspense>
   );
 }

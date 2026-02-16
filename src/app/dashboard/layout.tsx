@@ -6,34 +6,42 @@ import { InfobarProvider } from '@/components/ui/infobar';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
+import { Suspense } from 'react';
 
 export const metadata: Metadata = {
   title: 'Sun MGA — Dashboard',
   description: 'Sun MGA Insurance Platform Dashboard'
 };
 
+function DashboardLoading() {
+  return (
+    <div className='flex h-screen w-full items-center justify-center'>
+      <p className='text-muted-foreground'>Loading...</p>
+    </div>
+  );
+}
+
 export default async function DashboardLayout({
   children
 }: {
   children: React.ReactNode;
 }) {
-  // Persisting the sidebar state in the cookie.
   const cookieStore = await cookies();
   const defaultOpen = cookieStore.get('sidebar_state')?.value === 'true';
   return (
-    <KBar>
-      <SidebarProvider defaultOpen={defaultOpen}>
-        <InfobarProvider defaultOpen={false}>
-          <AppSidebar />
-          <SidebarInset>
-            <Header />
-            {/* page main content */}
-            {children}
-            {/* page main content ends */}
-          </SidebarInset>
-          <InfoSidebar side='right' />
-        </InfobarProvider>
-      </SidebarProvider>
-    </KBar>
+    <Suspense fallback={<DashboardLoading />}>
+      <KBar>
+        <SidebarProvider defaultOpen={defaultOpen}>
+          <InfobarProvider defaultOpen={false}>
+            <AppSidebar />
+            <SidebarInset>
+              <Header />
+              {children}
+            </SidebarInset>
+            <InfoSidebar side='right' />
+          </InfobarProvider>
+        </SidebarProvider>
+      </KBar>
+    </Suspense>
   );
 }

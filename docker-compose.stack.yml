@@ -1,0 +1,107 @@
+services:
+  # PostgreSQL for Stack Auth
+  stack-postgres:
+    image: postgres:16-alpine
+    container_name: stack-postgres
+    environment:
+      POSTGRES_USER: stackauth
+      POSTGRES_PASSWORD: stackauth_dev_password
+      POSTGRES_DB: stackauth
+    ports:
+      - "5434:5432"
+    volumes:
+      - stack-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stackauth"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Stack Auth Server (API + Dashboard)
+  stack-server:
+    image: stackauth/server:latest
+    container_name: stack-server
+    depends_on:
+      stack-postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_started
+    environment:
+      # Database
+      STACK_DATABASE_CONNECTION_STRING: postgresql://stackauth:stackauth_dev_password@stack-postgres:5432/stackauth
+      
+      # Server Configuration
+      STACK_SERVER_SECRET: local-dev-secret-change-in-production-12345678
+      STACK_BASE_URL: http://localhost:8101
+      NEXT_PUBLIC_STACK_URL: http://localhost:8101
+      NEXT_PUBLIC_STACK_API_URL: http://localhost:8102
+      
+      # Ports
+      PORT: 8101
+      NEXT_PUBLIC_STACK_DASHBOARD_PORT: 8101
+      NEXT_PUBLIC_STACK_BACKEND_PORT: 8102
+      
+      # Development mode
+      NODE_ENV: development
+      
+      # Email (using Inbucket for local dev)
+      STACK_EMAIL_HOST: host.docker.internal
+      STACK_EMAIL_PORT: 2500
+      STACK_EMAIL_USER: dev
+      STACK_EMAIL_PASSWORD: dev
+      STACK_EMAIL_SENDER: noreply@stack-local.dev
+      
+      # Optional: Disable email requirement for testing
+      STACK_DISABLE_EMAIL_VERIFICATION: true
+      
+      # ClickHouse (for analytics)
+      STACK_CLICKHOUSE_URL: http://clickhouse:8123
+      STACK_CLICKHOUSE_ADMIN_USER: default
+      STACK_CLICKHOUSE_ADMIN_PASSWORD: password
+      STACK_CLICKHOUSE_EXTERNAL_USER: default
+      STACK_CLICKHOUSE_EXTERNAL_PASSWORD: password
+      
+      # Stack Auth internal settings
+      STACK_SEED_INTERNAL_PROJECT_ALLOW_LOCALHOST: true
+      STACK_SEED_INTERNAL_PROJECT_SIGN_UP_ENABLED: true
+      STACK_RUN_MIGRATIONS: true
+      STACK_RUN_SEED_SCRIPT: true
+    ports:
+      - "8101:8101"  # Dashboard
+      - "8102:8102"  # API Backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ClickHouse for Stack Auth analytics
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: stack-clickhouse
+    environment:
+      CLICKHOUSE_DB: stackframe
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: password
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8133:8123"  # HTTP interface
+    volumes:
+      - stack-clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--password=password", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # Inbucket - Local email server for testing
+  inbucket:
+    image: inbucket/inbucket:stable
+    container_name: stack-inbucket
+    ports:
+      - "8105:9000"  # Web UI
+      - "2500:2500"  # SMTP
+    restart: unless-stopped
+
+volumes:
+  stack-postgres-data:
+  stack-clickhouse-data:
