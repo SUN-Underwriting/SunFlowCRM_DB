@@ -5,7 +5,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
-import { IconBuilding, IconUser } from '@tabler/icons-react';
+import { IconBuilding, IconUser, IconGripVertical } from '@tabler/icons-react';
 import { formatCurrency } from '@/lib/format-currency';
 import type { DealWithRelations } from '@/lib/api/crm-types';
 
@@ -20,6 +20,7 @@ export function DealCard({ deal, isDragging, onClick }: DealCardProps) {
     attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     isDragging: isSortableDragging
@@ -56,18 +57,33 @@ export function DealCard({ deal, isDragging, onClick }: DealCardProps) {
     <Card
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
       onClick={handleClick}
       className={cn(
-        'cursor-grab transition-shadow hover:shadow-md active:cursor-grabbing',
+        'transition-shadow hover:shadow-md',
         (isDragging || isSortableDragging) && 'opacity-50',
-        onClick && 'hover:ring-primary/50 hover:ring-1'
+        onClick && 'hover:ring-primary/50 cursor-pointer hover:ring-1'
       )}
     >
       <CardHeader className='pb-3'>
-        <div className='flex items-start justify-between gap-2'>
-          <h4 className='text-sm leading-tight font-medium'>{deal.title}</h4>
+        <div className='flex items-start gap-2'>
+          {/* Drag Handle */}
+          <button
+            ref={setActivatorNodeRef}
+            {...attributes}
+            {...listeners}
+            className='hover:bg-muted mt-0.5 flex-shrink-0 cursor-grab rounded p-0.5 active:cursor-grabbing'
+            onClick={(e) => e.stopPropagation()}
+            aria-label='Drag to move deal'
+          >
+            <IconGripVertical className='text-muted-foreground h-4 w-4' />
+          </button>
+
+          {/* Deal Title */}
+          <h4 className='flex-1 text-sm leading-tight font-medium'>
+            {deal.title}
+          </h4>
+
+          {/* Owner Avatar */}
           <Avatar className='h-6 w-6 flex-shrink-0'>
             <AvatarFallback className='text-xs'>{ownerInitials}</AvatarFallback>
           </Avatar>
