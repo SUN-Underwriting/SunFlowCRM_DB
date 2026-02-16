@@ -47,6 +47,7 @@ import type {
 export default function DealsPage() {
   const [selectedPipelineId, setSelectedPipelineId] = useState<string>('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [prefilledStageId, setPrefilledStageId] = useState<string | null>(null);
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
 
@@ -93,6 +94,12 @@ export default function DealsPage() {
 
   const handleDealMove = async (dealId: string, newStageId: string) => {
     await moveDeal.mutateAsync({ id: dealId, stageId: newStageId });
+  };
+
+  // Quick add handler - pre-fill pipeline and stage
+  const handleQuickAdd = (stageId: string) => {
+    setPrefilledStageId(stageId);
+    setCreateDialogOpen(true);
   };
 
   // Filter deals based on URL params (client-side MVP)
@@ -234,6 +241,7 @@ export default function DealsPage() {
                   setSelectedDealId(deal.id);
                   setDetailSheetOpen(true);
                 }}
+                onQuickAddClick={handleQuickAdd}
                 isLoading={isLoading}
               />
 
@@ -252,7 +260,21 @@ export default function DealsPage() {
 
       <CreateDealDialogEnhanced
         open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
+        onOpenChange={(open) => {
+          setCreateDialogOpen(open);
+          if (!open) {
+            // Clear prefilled stage when dialog closes
+            setPrefilledStageId(null);
+          }
+        }}
+        defaultValues={
+          prefilledStageId
+            ? {
+                pipelineId: selectedPipelineId,
+                stageId: prefilledStageId
+              }
+            : undefined
+        }
       />
 
       <DealDetailSheet

@@ -21,15 +21,19 @@ import type { PipelineWithRelations } from '@/lib/api/crm-types';
 interface CreateDealDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  defaultValues?: Partial<DealFormValues>;
 }
 
 /**
  * Create Deal Dialog with custom fields support.
  * Uses React Query for cached pipeline/stage data.
+ *
+ * @param defaultValues - Pre-fill form values (e.g., pipelineId/stageId for quick add)
  */
 export function CreateDealDialogEnhanced({
   open,
-  onOpenChange
+  onOpenChange,
+  defaultValues
 }: CreateDealDialogProps) {
   const createDeal = useCreateDeal();
 
@@ -92,6 +96,7 @@ export function CreateDealDialogEnhanced({
           </div>
         ) : (
           <DealFormWithCustomFields
+            defaultValues={defaultValues}
             onSubmit={handleSubmit}
             onCancel={() => onOpenChange(false)}
             isLoading={createDeal.isPending}

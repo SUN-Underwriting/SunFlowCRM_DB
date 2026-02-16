@@ -21,10 +21,12 @@ import {
 } from '@dnd-kit/sortable';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DealCard } from './deal-card';
 import { cn } from '@/lib/utils';
 import { formatCurrency } from '@/lib/format-currency';
+import { IconPlus } from '@tabler/icons-react';
 import type {
   DealWithRelations,
   StageWithRelations
@@ -38,6 +40,7 @@ interface PipelineBoardProps {
   }>;
   onDealMove: (dealId: string, newStageId: string) => Promise<void>;
   onDealClick?: (deal: DealWithRelations) => void;
+  onQuickAddClick?: (stageId: string) => void;
   isLoading?: boolean;
 }
 
@@ -77,12 +80,14 @@ function DroppableStageZone({
  * - Sortable items within each stage
  * - Optimistic UI updates via React Query
  * - Collision detection with closestCenter
+ * - Quick add button in stage header (Pipedrive-like)
  */
 export function PipelineBoard({
   stages,
   dealsByStage,
   onDealMove,
   onDealClick,
+  onQuickAddClick,
   isLoading
 }: PipelineBoardProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -207,13 +212,26 @@ export function PipelineBoard({
             )}
           >
             <CardHeader className='pb-3'>
-              <div className='flex items-center justify-between'>
-                <CardTitle className='text-base font-medium'>
-                  {stage.name}
-                </CardTitle>
-                <Badge variant='secondary' className='ml-2'>
-                  {deals.length}
-                </Badge>
+              <div className='flex items-center justify-between gap-2'>
+                <div className='flex items-center gap-2'>
+                  <CardTitle className='text-base font-medium'>
+                    {stage.name}
+                  </CardTitle>
+                  <Badge variant='secondary'>{deals.length}</Badge>
+                </div>
+
+                {/* Quick Add Button */}
+                {onQuickAddClick && (
+                  <Button
+                    size='icon'
+                    variant='ghost'
+                    className='h-7 w-7 flex-shrink-0'
+                    onClick={() => onQuickAddClick(stage.id)}
+                    title={`Add deal to ${stage.name}`}
+                  >
+                    <IconPlus className='h-4 w-4' />
+                  </Button>
+                )}
               </div>
               <div className='text-muted-foreground text-sm'>
                 {formatCurrency(getTotalValue(deals))}
