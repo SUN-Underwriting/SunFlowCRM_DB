@@ -12,8 +12,18 @@ import {
   Stage,
   Activity,
   Email,
-  FieldDefinition
+  FieldDefinition,
+  Note,
+  LeadLabel,
+  LeadLabelLink,
+  DealLabel,
+  DealLabelLink,
+  DealVisibility,
+  DealPriority
 } from '@prisma/client';
+
+// Re-export enums for convenience
+export type { DealVisibility, DealPriority };
 
 // Base list response type
 export interface ListResponse<T> {
@@ -24,9 +34,13 @@ export interface ListResponse<T> {
 // Extended types with relations (as returned by API)
 // Note: Using Omit to replace Decimal with number for JSON serialization
 export interface OrganizationWithRelations extends Organization {
+  persons?: Person[];
+  deals?: (Deal & { stage?: Stage | null; pipeline?: Pipeline | null })[];
   _count?: {
     persons?: number;
     deals?: number;
+    activities?: number;
+    emails?: number;
   };
 }
 
@@ -38,7 +52,16 @@ export interface PersonWithRelations extends Person {
   };
 }
 
-export interface LeadWithRelations extends Lead {
+export interface LeadLabelWithLink extends LeadLabelLink {
+  label: LeadLabel;
+}
+
+export interface DealLabelWithLink extends DealLabelLink {
+  label: DealLabel;
+}
+
+export interface LeadWithRelations extends Omit<Lead, 'valueAmount'> {
+  valueAmount?: number | null;
   person?: Person | null;
   organization?: Organization | null;
   owner?: {
@@ -47,6 +70,35 @@ export interface LeadWithRelations extends Lead {
     firstName: string | null;
     lastName: string | null;
   } | null;
+  creator?: {
+    id: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+  } | null;
+  convertedToDeal?: {
+    id: string;
+    title: string;
+    value?: number | null;
+    status: string;
+  } | null;
+  labelLinks?: LeadLabelWithLink[];
+}
+
+export interface NoteWithRelations extends Note {
+  author?: {
+    id: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+  } | null;
+}
+
+export interface TimelineItem {
+  id: string;
+  type: 'activity' | 'note' | 'email';
+  timestamp: string;
+  data: Record<string, unknown>;
 }
 
 export interface DealWithRelations extends Omit<Deal, 'value'> {
@@ -61,9 +113,18 @@ export interface DealWithRelations extends Omit<Deal, 'value'> {
     firstName: string | null;
     lastName: string | null;
   };
+  creator?: {
+    id: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+  } | null;
+  labelLinks?: DealLabelWithLink[];
   _count?: {
     activities?: number;
     emails?: number;
+    notes?: number;
+    labelLinks?: number;
   };
 }
 
@@ -81,7 +142,8 @@ export interface StageWithRelations extends Stage {
 }
 
 export interface ActivityWithRelations extends Activity {
-  deal?: Deal | null;
+  deal?: (Deal & { stage?: { name: string } | null }) | null;
+  lead?: { id: string; title: string; status: string } | null;
   person?: Person | null;
   organization?: Organization | null;
   owner?: {

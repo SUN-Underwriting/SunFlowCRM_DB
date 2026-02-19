@@ -26,17 +26,26 @@ model Tenant {
 
   users User[]
 
+  // Notification Relations
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
+  entityWatchers          EntityWatcher[]
+
   // CRM Relations
-  organizations    Organization[]
-  persons          Person[]
-  pipelines        Pipeline[]
-  stages           Stage[]
-  deals            Deal[]
-  leads            Lead[]
-  activities       Activity[]
-  emails           Email[]
-  emailAccounts    EmailAccount[]
-  fieldDefinitions FieldDefinition[]
+  organizations      Organization[]
+  persons            Person[]
+  pipelines          Pipeline[]
+  stages             Stage[]
+  deals              Deal[]
+  leads              Lead[]
+  leadLabels         LeadLabel[]
+  dealLabels         DealLabel[]
+  dealPermittedUsers DealPermittedUser[]
+  activities         Activity[]
+  emails             Email[]
+  emailAccounts      EmailAccount[]
+  fieldDefinitions   FieldDefinition[]
+  notes              Note[]
 
   @@map("tenants")
 }
@@ -77,12 +86,23 @@ model User {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  // Notification Relations
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
+  entityWatchers          EntityWatcher[]
+
   // CRM Relations
-  deals         Deal[]
-  leads         Lead[]
-  activities    Activity[]
-  emails        Email[]
-  emailAccounts EmailAccount[]
+  ownedDeals         Deal[]              @relation("DealOwner")
+  createdDeals       Deal[]              @relation("DealCreator")
+  ownedLeads         Lead[]              @relation("LeadOwner")
+  createdLeads       Lead[]              @relation("LeadCreator")
+  ownedOrganizations Organization[]
+  activities         Activity[]
+  emails             Email[]
+  emailAccounts      EmailAccount[]
+  notes              Note[]
+  leadPermittedUsers LeadPermittedUser[]
+  dealPermittedUsers DealPermittedUser[]
 
   @@unique([email, tenantId], name: "user_email_tenant_unique")
   @@index([tenantId])
@@ -133,36 +153,148 @@ model AuditLog {
 }
 
 // ============================================
+// CORE INFRASTRUCTURE - Notifications
+// ============================================
+
+model OutboxEvent {
+  id            String       @id @default(cuid())
+  tenantId      String
+  sourceEventId String
+  type          String       // e.g. "crm.activity.assigned"
+  actorUserId   String?
+  entityKind    String?      // e.g. "activity", "deal", "lead"
+  entityId      String?
+  payload       Json         @default("{}")
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  maxAttempts   Int          @default(5)
+  lockedAt      DateTime?
+  lastError     String?      @db.Text
+  occurredAt    DateTime     @default(now())
+  processedAt   DateTime?
+
+  @@unique([tenantId, sourceEventId])
+  @@index([status, occurredAt])
+  @@index([tenantId, status, occurredAt])
+  @@index([type, status])
+  @@map("outbox_events")
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+model Notification {
+  id            String    @id @default(cuid())
+  tenantId      String
+  userId        String
+  type          String    // e.g. "crm.activity.assigned"
+  title         String
+  body          String    @db.Text
+  data          Json      @default("{}") // entity refs, deep-link info
+  severity      NotificationSeverity @default(INFO)
+  sourceEventId String?
+  dedupeKey     String?
+  readAt        DateTime?
+  archivedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, sourceEventId])
+  @@index([tenantId, userId, createdAt(sort: Desc)])
+  @@index([tenantId, userId, readAt])
+  @@map("notifications")
+}
+
+enum NotificationSeverity {
+  INFO
+  WARNING
+  URGENT
+}
+
+model NotificationPreference {
+  id               String  @id @default(cuid())
+  tenantId         String
+  userId           String
+  notificationType String  // e.g. "crm.activity.assigned" or "*" for global
+  enabled          Boolean @default(true)
+  // v2: channels Json, digestMode String, quietFrom String, quietTo String, timezone String
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, notificationType])
+  @@index([tenantId, userId])
+  @@map("notification_preferences")
+}
+
+model EntityWatcher {
+  id         String @id @default(cuid())
+  tenantId   String
+  entityKind String // "deal", "lead", "organization"
+  entityId   String
+  userId     String
+
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entityKind, entityId, userId])
+  @@index([tenantId, entityKind, entityId])
+  @@index([userId])
+  @@map("entity_watchers")
+}
+
+// ============================================
 // CRM DOMAIN MODELS
 // ============================================
 
 // --- Contacts Module ---
 
 model Organization {
-  id         String    @id @default(cuid())
-  tenantId   String
-  name       String
-  address    String?
-  industry   String?
-  size       String? // e.g., "1-10", "11-50", "51-200", etc.
-  website    String?
-  phone      String?
-  customData Json      @default("{}")
-  deleted    Boolean   @default(false)
-  deletedAt  DateTime?
+  id          String    @id @default(cuid())
+  tenantId    String
+  name        String
+  domain      String? // Normalized email domain (e.g., "acme.com") for auto-linking
+  ownerId     String? // Account manager / owner
+  address     String?
+  countryCode String? // ISO country code (e.g., "CH", "DE", "US")
+  city        String?
+  industry    String?
+  size        String? // e.g., "1-10", "11-50", "51-200", etc.
+  website     String?
+  phone       String?
+  customData  Json      @default("{}")
+  // Activity analytics
+  lastActivityDate DateTime?
+  nextActivityDate DateTime?
+  deleted     Boolean   @default(false)
+  deletedAt   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner      User?      @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   persons    Person[]
   deals      Deal[]
   leads      Lead[]
   activities Activity[]
   emails     Email[]
+  notes      Note[]
 
   @@index([tenantId])
   @@index([tenantId, deleted])
+  @@index([tenantId, domain])
+  @@index([tenantId, ownerId])
+  @@index([tenantId, countryCode])
+  @@index([tenantId, city])
   @@map("organizations")
 }
 
@@ -176,6 +308,9 @@ model Person {
   phone      String?
   jobTitle   String?
   customData Json      @default("{}")
+  // Activity analytics
+  lastActivityDate DateTime?
+  nextActivityDate DateTime?
   deleted    Boolean   @default(false)
   deletedAt  DateTime?
 
@@ -188,6 +323,7 @@ model Person {
   leads        Lead[]
   activities   Activity[]
   emails       Email[]
+  notes        Note[]
 
   @@index([tenantId])
   @@index([tenantId, deleted])
@@ -264,56 +400,243 @@ model Deal {
   deleted           Boolean    @default(false)
   deletedAt         DateTime?
 
+  // V2 fields (PR-1)
+  creatorId       String?          // Who created the deal
+  probability     Int?             // 0-100, manual override of stage probability
+  stageChangeTime DateTime?        // When stage was last changed
+  firstWonTime    DateTime?        // First time deal was won (for reopen tracking)
+  source          String?          // Business source: inbound_call, email, web_form, partner, etc.
+  externalSourceId String?         // ID in external system
+  visibility      DealVisibility   @default(COMPANY) // Visibility level
+  priority        DealPriority?    // Deal priority
+  rottenFlag      Boolean          @default(false) // Is deal rotten (stuck too long on stage)
+  rottenTime      DateTime?        // When deal became rotten
+  renewalType     String?          // one_time, renewal, new_business
+  // Activity analytics
+  lastActivityDate DateTime?
+  nextActivityDate DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant             Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  pipeline           Pipeline      @relation(fields: [pipelineId], references: [id], onDelete: Restrict)
-  stage              Stage         @relation(fields: [stageId], references: [id], onDelete: Restrict)
-  owner              User          @relation(fields: [ownerId], references: [id], onDelete: Restrict)
-  person             Person?       @relation(fields: [personId], references: [id], onDelete: SetNull)
-  organization       Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  pipeline           Pipeline            @relation(fields: [pipelineId], references: [id], onDelete: Restrict)
+  stage              Stage               @relation(fields: [stageId], references: [id], onDelete: Restrict)
+  owner              User                @relation("DealOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  creator            User?               @relation("DealCreator", fields: [creatorId], references: [id], onDelete: SetNull)
+  person             Person?             @relation(fields: [personId], references: [id], onDelete: SetNull)
+  organization       Organization?       @relation(fields: [orgId], references: [id], onDelete: SetNull)
   activities         Activity[]
   emails             Email[]
+  notes              Note[]
   convertedFromLeads Lead[]
+  labelLinks         DealLabelLink[]
+  permittedUsers     DealPermittedUser[]
 
   @@index([tenantId])
   @@index([tenantId, deleted])
   @@index([tenantId, status, expectedCloseDate])
   @@index([pipelineId, stageId])
   @@index([ownerId])
+  @@index([creatorId])
+  @@index([tenantId, visibility])
+  @@index([tenantId, priority])
+  @@index([tenantId, source])
+  @@index([tenantId, stageChangeTime])
+  @@index([tenantId, rottenFlag])
   @@map("deals")
 }
 
 // --- Leads Module ---
 
 model Lead {
-  id              String     @id @default(cuid())
+  id              String         @id @default(uuid())
   tenantId        String
   ownerId         String
+  creatorId       String?
   personId        String?
   orgId           String?
   title           String
-  source          String? // e.g., "Website", "Referral", "Cold Call"
-  status          LeadStatus @default(NEW)
+  description     String?        @db.Text
+  source          String? // Business source: Website, Referral, Cold Call, Partner
+  origin          String? // Technical origin: API, WebForm, Import, Manual
+  inboxChannel    String? // Inbox entry channel: web_form, email_inbox, api, manual
+  externalSourceId String? // ID in external system (Facebook Ads, landing, other CRM)
+  status          LeadStatus     @default(OPEN)
+  valueAmount     Decimal?       @db.Decimal(18, 2)
+  valueCurrency   String?        @db.VarChar(3) // ISO currency code
+  expectedCloseDate DateTime?    @db.Date
+  wasSeen         Boolean?
+  visibility      LeadVisibility @default(COMPANY)
   convertedDealId String?
-  deleted         Boolean    @default(false)
+  customData      Json           @default("{}")
+  // Activity analytics
+  lastActivityDate DateTime?
+  nextActivityDate DateTime?
+  deleted         Boolean        @default(false)
   deletedAt       DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  owner           User          @relation(fields: [ownerId], references: [id], onDelete: Restrict)
-  person          Person?       @relation(fields: [personId], references: [id], onDelete: SetNull)
-  organization    Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
-  convertedToDeal Deal?         @relation(fields: [convertedDealId], references: [id], onDelete: SetNull)
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner           User                @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  creator         User?               @relation("LeadCreator", fields: [creatorId], references: [id], onDelete: SetNull)
+  person          Person?             @relation(fields: [personId], references: [id], onDelete: SetNull)
+  organization    Organization?       @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  convertedToDeal Deal?               @relation(fields: [convertedDealId], references: [id], onDelete: SetNull)
+  labelLinks      LeadLabelLink[]
+  permittedUsers  LeadPermittedUser[]
+  notes           Note[]
+  activities      Activity[]
+  emails          Email[]
 
   @@index([tenantId])
   @@index([tenantId, status])
   @@index([tenantId, deleted])
+  @@index([tenantId, wasSeen])
   @@index([ownerId])
+  @@index([creatorId])
   @@map("leads")
+}
+
+model LeadLabel {
+  id        String  @id @default(uuid())
+  tenantId  String
+  name      String
+  color     String? // Hex color code for UI display
+  isSystem  Boolean @default(false) // System labels (hot/warm/cold) can't be deleted
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  leadLinks LeadLabelLink[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("lead_labels")
+}
+
+model LeadLabelLink {
+  leadId  String
+  labelId String
+
+  lead  Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  label LeadLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([leadId, labelId])
+  @@map("lead_label_links")
+}
+
+model LeadPermittedUser {
+  id             String @id @default(uuid())
+  tenantId       String
+  leadId         String
+  userId         String
+  permissionType String @default("read") // read | write
+
+  createdAt DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([leadId, userId])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("lead_permitted_users")
+}
+
+// --- Deal Labels Module ---
+
+model DealLabel {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  color     String?  @default("#6B7280")
+  isSystem  Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dealLinks DealLabelLink[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("deal_labels")
+}
+
+model DealLabelLink {
+  id        String   @id @default(cuid())
+  dealId    String
+  labelId   String
+
+  createdAt DateTime @default(now())
+
+  deal  Deal      @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  label DealLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@unique([dealId, labelId])
+  @@index([dealId])
+  @@index([labelId])
+  @@map("deal_label_links")
+}
+
+model DealPermittedUser {
+  id             String   @id @default(cuid())
+  tenantId       String
+  dealId         String
+  userId         String
+  permissionType String   @default("read") // "read" | "write"
+
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([dealId, userId])
+  @@index([tenantId])
+  @@index([dealId])
+  @@index([userId])
+  @@map("deal_permitted_users")
+}
+
+// --- Notes Module ---
+
+model Note {
+  id       String  @id @default(uuid())
+  tenantId String
+  authorId String
+  body     String  @db.Text
+  pinned   Boolean @default(false)
+
+  leadId   String?
+  dealId   String?
+  personId String?
+  orgId    String?
+
+  deleted   Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  author       User          @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  lead         Lead?         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  deal         Deal?         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  person       Person?       @relation(fields: [personId], references: [id], onDelete: SetNull)
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, deleted])
+  @@index([leadId])
+  @@index([dealId])
+  @@index([personId])
+  @@index([authorId])
+  @@map("notes")
 }
 
 // --- Activities Module ---
@@ -325,12 +648,19 @@ model Activity {
   type        ActivityType
   subject     String
   dueAt       DateTime?
+  hasTime     Boolean      @default(false) // false = all-day, true = specific time in dueAt
+  durationMin Int?
+  busyFlag    BusyFlag     @default(FREE)
   done        Boolean      @default(false)
   dealId      String?
+  leadId      String?
   personId    String?
   orgId       String?
   note        String?      @db.Text
   completedAt DateTime?
+  // Calendar sync scaffold
+  externalEventId  String?
+  calendarProvider String?
   deleted     Boolean      @default(false)
   deletedAt   DateTime?
 
@@ -340,13 +670,16 @@ model Activity {
   tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   owner        User          @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   deal         Deal?         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  lead         Lead?         @relation(fields: [leadId], references: [id], onDelete: Cascade)
   person       Person?       @relation(fields: [personId], references: [id], onDelete: SetNull)
   organization Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
   @@index([tenantId, done, dueAt])
+  @@index([tenantId, ownerId, done, dueAt])
   @@index([tenantId, deleted])
   @@index([dealId])
+  @@index([leadId])
   @@index([personId])
   @@index([ownerId])
   @@map("activities")
@@ -375,6 +708,7 @@ model Email {
   hasTextBody           Boolean        @default(false)
   threadId              String?
   dealId                String?
+  leadId                String?
   personId              String?
   orgId                 String?
   isLinkedAutomatically Boolean        @default(false)
@@ -388,6 +722,7 @@ model Email {
   user           User                 @relation(fields: [userId], references: [id], onDelete: Restrict)
   account        EmailAccount?        @relation(fields: [providerAccountId], references: [id], onDelete: SetNull)
   deal           Deal?                @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  lead           Lead?                @relation(fields: [leadId], references: [id], onDelete: Cascade)
   person         Person?              @relation(fields: [personId], references: [id], onDelete: SetNull)
   organization   Organization?        @relation(fields: [orgId], references: [id], onDelete: SetNull)
   trackingEvents EmailTrackingEvent[]
@@ -397,6 +732,7 @@ model Email {
   @@index([tenantId, deleted])
   @@index([threadId])
   @@index([dealId])
+  @@index([leadId])
   @@index([personId])
   @@index([userId])
   @@map("emails")
@@ -478,11 +814,29 @@ enum DealStatus {
   LOST
 }
 
+enum DealVisibility {
+  OWNER
+  TEAM
+  COMPANY
+}
+
+enum DealPriority {
+  LOW
+  NORMAL
+  HIGH
+}
+
 enum LeadStatus {
-  NEW
-  IN_PROGRESS
+  OPEN
+  LOST
   ARCHIVED
   CONVERTED
+}
+
+enum LeadVisibility {
+  OWNER
+  TEAM
+  COMPANY
 }
 
 enum ActivityType {
@@ -490,6 +844,13 @@ enum ActivityType {
   MEETING
   TASK
   EMAIL
+  DEADLINE
+  LUNCH
+}
+
+enum BusyFlag {
+  FREE
+  BUSY
 }
 
 enum EmailDirection {
@@ -510,6 +871,7 @@ enum TrackingEventType {
 
 enum FieldEntityType {
   DEAL
+  LEAD
   PERSON
   ORGANIZATION
 }

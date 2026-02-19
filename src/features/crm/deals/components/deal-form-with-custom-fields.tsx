@@ -13,6 +13,7 @@ import {
   FormMessage
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { MaskInput } from '@/components/ui/mask-input';
 import {
   Select,
   SelectContent,
@@ -47,6 +48,10 @@ const baseDealFormSchema = z.object({
   expectedCloseDate: z.date().optional(),
   personId: z.string().optional(),
   orgId: z.string().optional(),
+  // V2 fields
+  source: z.string().max(100).optional(),
+  priority: z.enum(['LOW', 'NORMAL', 'HIGH']).optional(),
+  visibility: z.enum(['OWNER', 'TEAM', 'COMPANY']).optional(),
   customData: z.record(z.string(), z.unknown()).optional()
 });
 
@@ -326,17 +331,18 @@ export function DealFormWithCustomFields({
               <FormItem>
                 <FormLabel>Deal Value</FormLabel>
                 <FormControl>
-                  <Input
-                    type='number'
-                    placeholder='0'
-                    {...field}
-                    onChange={(e) =>
-                      field.onChange(
-                        e.target.value === ''
-                          ? undefined
-                          : parseFloat(e.target.value)
-                      )
+                  <MaskInput
+                    mask='currency'
+                    currency={form.watch('currency') || 'USD'}
+                    placeholder='$0.00'
+                    value={
+                      field.value != null ? String(field.value) : ''
                     }
+                    onValueChange={(_masked, unmasked) => {
+                      field.onChange(
+                        unmasked === '' ? undefined : parseFloat(unmasked)
+                      );
+                    }}
                   />
                 </FormControl>
                 <FormMessage />
@@ -360,6 +366,7 @@ export function DealFormWithCustomFields({
                     <SelectItem value='USD'>USD</SelectItem>
                     <SelectItem value='EUR'>EUR</SelectItem>
                     <SelectItem value='GBP'>GBP</SelectItem>
+                    <SelectItem value='CHF'>CHF</SelectItem>
                   </SelectContent>
                 </Select>
                 <FormMessage />
@@ -407,6 +414,72 @@ export function DealFormWithCustomFields({
             </FormItem>
           )}
         />
+
+        {/* V2 Fields */}
+        <div className='grid grid-cols-3 gap-4'>
+          <FormField
+            control={form.control}
+            name='priority'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Priority</FormLabel>
+                <Select onValueChange={field.onChange} value={field.value}>
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder='Select priority' />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value='LOW'>Low</SelectItem>
+                    <SelectItem value='NORMAL'>Normal</SelectItem>
+                    <SelectItem value='HIGH'>High</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='visibility'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Visibility</FormLabel>
+                <Select
+                  onValueChange={field.onChange}
+                  value={field.value || 'COMPANY'}
+                >
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder='Select visibility' />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value='OWNER'>Owner Only</SelectItem>
+                    <SelectItem value='TEAM'>Team</SelectItem>
+                    <SelectItem value='COMPANY'>Company</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='source'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Source</FormLabel>
+                <FormControl>
+                  <Input placeholder='e.g., Website, Referral' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
 
         {/* Custom Fields Section */}
         {customFields.length > 0 && (

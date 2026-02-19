@@ -24,7 +24,9 @@ import {
   IconChevronRight,
   IconPhone,
   IconWorld,
-  IconBuilding
+  IconBuilding,
+  IconArrowUp,
+  IconArrowDown
 } from '@tabler/icons-react';
 import type { OrganizationWithRelations } from '@/lib/api/crm-types';
 
@@ -56,7 +58,24 @@ export function OrganizationsTable({
   const columns: ColumnDef<OrganizationWithRelations>[] = [
     {
       accessorKey: 'name',
-      header: 'Name',
+      header: ({ column }) => {
+        return (
+          <Button
+            variant='ghost'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            className='-ml-4'
+          >
+            Name
+            {column.getIsSorted() === 'asc' && (
+              <IconArrowUp className='ml-2 h-4 w-4' />
+            )}
+            {column.getIsSorted() === 'desc' && (
+              <IconArrowDown className='ml-2 h-4 w-4' />
+            )}
+          </Button>
+        );
+      },
+      enableSorting: true,
       cell: ({ row }) => {
         const org = row.original;
         const initials = org.name
@@ -80,7 +99,24 @@ export function OrganizationsTable({
     },
     {
       accessorKey: 'industry',
-      header: 'Industry',
+      header: ({ column }) => {
+        return (
+          <Button
+            variant='ghost'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            className='-ml-4'
+          >
+            Industry
+            {column.getIsSorted() === 'asc' && (
+              <IconArrowUp className='ml-2 h-4 w-4' />
+            )}
+            {column.getIsSorted() === 'desc' && (
+              <IconArrowDown className='ml-2 h-4 w-4' />
+            )}
+          </Button>
+        );
+      },
+      enableSorting: true,
       cell: ({ row }) => {
         const industry = row.original.industry;
         return industry ? (
@@ -104,7 +140,24 @@ export function OrganizationsTable({
     },
     {
       accessorKey: 'website',
-      header: 'Website',
+      header: ({ column }) => {
+        return (
+          <Button
+            variant='ghost'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            className='-ml-4'
+          >
+            Website
+            {column.getIsSorted() === 'asc' && (
+              <IconArrowUp className='ml-2 h-4 w-4' />
+            )}
+            {column.getIsSorted() === 'desc' && (
+              <IconArrowDown className='ml-2 h-4 w-4' />
+            )}
+          </Button>
+        );
+      },
+      enableSorting: true,
       cell: ({ row }) => {
         const website = row.original.website;
         if (!website) return <span className='text-muted-foreground'>—</span>;

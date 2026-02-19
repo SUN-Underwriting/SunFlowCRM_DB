@@ -92,6 +92,12 @@ export function useCreateDeal() {
       value?: number;
       currency?: string;
       expectedCloseDate?: Date;
+      // V2 fields
+      source?: string;
+      externalSourceId?: string;
+      visibility?: 'OWNER' | 'TEAM' | 'COMPANY';
+      priority?: 'LOW' | 'NORMAL' | 'HIGH';
+      renewalType?: string;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       customData?: any;
     }) => {
@@ -131,6 +137,14 @@ export function useUpdateDeal() {
         expectedCloseDate?: Date;
         personId?: string;
         orgId?: string;
+        ownerId?: string;
+        // V2 fields
+        source?: string;
+        externalSourceId?: string;
+        visibility?: 'OWNER' | 'TEAM' | 'COMPANY';
+        priority?: 'LOW' | 'NORMAL' | 'HIGH';
+        probability?: number;
+        renewalType?: string;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         customData?: any;
       };
@@ -259,6 +273,81 @@ export function useDeleteDeal() {
     },
     onError: (error: Error) => {
       toast.error(error.message || 'Failed to delete deal');
+    }
+  });
+}
+
+/**
+ * Hook to mark deal as won
+ */
+export function useMarkDealAsWon() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await dealsApi.markAsWon(id);
+      return response.data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: dealsKeys.detail(data.id) });
+      queryClient.invalidateQueries({ queryKey: dealsKeys.lists() });
+      queryClient.invalidateQueries({
+        queryKey: dealsKeys.byPipeline(data.pipelineId)
+      });
+      toast.success('Deal marked as won');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to mark deal as won');
+    }
+  });
+}
+
+/**
+ * Hook to mark deal as lost
+ */
+export function useMarkDealAsLost() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason?: string }) => {
+      const response = await dealsApi.markAsLost(id, reason);
+      return response.data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: dealsKeys.detail(data.id) });
+      queryClient.invalidateQueries({ queryKey: dealsKeys.lists() });
+      queryClient.invalidateQueries({
+        queryKey: dealsKeys.byPipeline(data.pipelineId)
+      });
+      toast.success('Deal marked as lost');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to mark deal as lost');
+    }
+  });
+}
+
+/**
+ * Hook to reopen a closed deal (WON/LOST back to OPEN)
+ */
+export function useReopenDeal() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await dealsApi.reopen(id);
+      return response.data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: dealsKeys.detail(data.id) });
+      queryClient.invalidateQueries({ queryKey: dealsKeys.lists() });
+      queryClient.invalidateQueries({
+        queryKey: dealsKeys.byPipeline(data.pipelineId)
+      });
+      toast.success('Deal reopened successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to reopen deal');
     }
   });
 }

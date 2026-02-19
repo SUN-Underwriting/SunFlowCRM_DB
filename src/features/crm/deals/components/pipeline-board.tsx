@@ -1,32 +1,20 @@
 'use client';
 
-import { useState } from 'react';
-import {
-  DndContext,
-  DragEndEvent,
-  DragOverlay,
-  DragStartEvent,
-  PointerSensor,
-  KeyboardSensor,
-  useSensor,
-  useSensors,
-  closestCenter,
-  DragOverEvent,
-  useDroppable
-} from '@dnd-kit/core';
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy
-} from '@dnd-kit/sortable';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Kanban,
+  KanbanBoard,
+  KanbanColumn,
+  KanbanColumnHandle,
+  KanbanItem,
+  KanbanOverlay
+} from '@/components/ui/kanban';
 import { DealCard } from './deal-card';
 import { cn } from '@/lib/utils';
-import { formatCurrency } from '@/lib/format-currency';
-import { IconPlus } from '@tabler/icons-react';
+import { IconPlus, IconGripVertical } from '@tabler/icons-react';
+import type { DragEndEvent } from '@dnd-kit/core';
 import type {
   DealWithRelations,
   StageWithRelations
@@ -45,42 +33,11 @@ interface PipelineBoardProps {
 }
 
 /**
- * Droppable Zone for empty stages
- * Best Practice (Context7): Provide drop target for empty containers
- */
-function DroppableStageZone({
-  id,
-  children,
-  isOver
-}: {
-  id: string;
-  children: React.ReactNode;
-  isOver?: boolean;
-}) {
-  const { setNodeRef } = useDroppable({ id });
-
-  return (
-    <div
-      ref={setNodeRef}
-      className={cn(
-        'min-h-[100px] space-y-2 rounded-md p-2 transition-colors',
-        isOver && 'bg-primary/10 border-primary border-2 border-dashed'
-      )}
-    >
-      {children}
-    </div>
-  );
-}
-
-/**
  * Pipeline Board - Kanban view for deals
- *
- * Best Practices (Context7 + dnd-kit):
- * - Multiple droppable containers for stages
- * - Sortable items within each stage
- * - Optimistic UI updates via React Query
- * - Collision detection with closestCenter
- * - Quick add button in stage header (Pipedrive-like)
+ * Follows DiceUI controlled component pattern:
+ *   value={columns} onValueChange={setColumns}
+ * API call fires once on onDragEnd (not on every drag-over).
+ * @see https://www.diceui.com/docs/components/radix/kanban
  */
 export function PipelineBoard({
   stages,
@@ -90,188 +47,175 @@ export function PipelineBoard({
   onQuickAddClick,
   isLoading
 }: PipelineBoardProps) {
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [activeDeal, setActiveDeal] = useState<DealWithRelations | null>(null);
-  const [overStageId, setOverStageId] = useState<string | null>(null);
+  // Server-sourced column map
+  const serverColumns = useMemo(() => {
+    const map: Record<string, DealWithRelations[]> = {};
+    dealsByStage.forEach(({ stage, deals }) => {
+      map[stage.id] = deals;
+    });
+    return map;
+  }, [dealsByStage]);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8 // Prevent accidental drags
+  // Local state for instant visual feedback during drag
+  const [columns, setColumns] = useState(serverColumns);
+
+  // Sync local state when server data changes (after API mutation / React Query refetch)
+  useEffect(() => {
+    setColumns(serverColumns);
+  }, [serverColumns]);
+
+  // Always-current ref so onDragEnd reads post-move state
+  const columnsRef = useRef(columns);
+  columnsRef.current = columns;
+
+  // Pre-drag snapshot to detect what changed on drop
+  const snapshotRef = useRef(serverColumns);
+  useEffect(() => {
+    snapshotRef.current = serverColumns;
+  }, [serverColumns]);
+
+  // Fires once when user drops the card.
+  // Cross-column moves are already reflected in `columns` from onDragOver→onValueChange.
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const draggedId = event.active.id as string;
+      const snapshot = snapshotRef.current;
+      const current = columnsRef.current;
+
+      // Find original column
+      let originalStageId: string | null = null;
+      for (const [stageId, deals] of Object.entries(snapshot)) {
+        if (deals.some((d) => d.id === draggedId)) {
+          originalStageId = stageId;
+          break;
+        }
       }
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates
-    })
+
+      // Find current column
+      let newStageId: string | null = null;
+      for (const [stageId, deals] of Object.entries(current)) {
+        if (deals.some((d) => d.id === draggedId)) {
+          newStageId = stageId;
+          break;
+        }
+      }
+
+      if (newStageId && originalStageId && newStageId !== originalStageId) {
+        onDealMove(draggedId, newStageId);
+      }
+    },
+    [onDealMove]
   );
-
-  const handleDragStart = (event: DragStartEvent) => {
-    const { active } = event;
-    setActiveId(active.id as string);
-
-    // Find the deal being dragged
-    const deal = dealsByStage
-      .flatMap((s) => s.deals)
-      .find((d) => d.id === active.id);
-    setActiveDeal(deal || null);
-  };
-
-  const handleDragOver = (event: DragOverEvent) => {
-    const { over } = event;
-
-    // Track which stage we're hovering over for visual feedback
-    if (over) {
-      const stageId = over.id as string;
-      if (stages.some((s) => s.id === stageId)) {
-        setOverStageId(stageId);
-      }
-    } else {
-      setOverStageId(null);
-    }
-  };
-
-  const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
-
-    setOverStageId(null);
-
-    if (!over) {
-      setActiveId(null);
-      setActiveDeal(null);
-      return;
-    }
-
-    const dealId = active.id as string;
-    let newStageId = over.id as string;
-
-    // If dropped on a deal, find its stage
-    const targetDealStage = dealsByStage.find((s) =>
-      s.deals.some((d) => d.id === newStageId)
-    );
-    if (targetDealStage) {
-      newStageId = targetDealStage.stage.id;
-    }
-
-    // Find current stage
-    const currentStage = dealsByStage.find((s) =>
-      s.deals.some((d) => d.id === dealId)
-    );
-
-    if (currentStage && currentStage.stage.id !== newStageId) {
-      await onDealMove(dealId, newStageId);
-    }
-
-    setActiveId(null);
-    setActiveDeal(null);
-  };
-
-  const getTotalValue = (deals: DealWithRelations[]) => {
-    return deals.reduce((sum, deal) => sum + (deal.value || 0), 0);
-  };
 
   if (isLoading) {
     return (
-      <div className='flex gap-4 overflow-x-auto pb-4'>
+      <div className='grid auto-rows-fr grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4'>
         {[1, 2, 3, 4].map((i) => (
-          <Card
+          <div
             key={i}
-            className='w-[280px] flex-shrink-0 animate-pulse md:w-[320px]'
+            className='flex animate-pulse flex-col gap-2 rounded-lg border bg-zinc-100 p-2.5 dark:bg-zinc-900'
           >
-            <CardHeader className='pb-3'>
-              <div className='bg-muted h-5 w-24 rounded' />
-              <div className='bg-muted mt-2 h-4 w-16 rounded' />
-            </CardHeader>
-            <CardContent>
-              <div className='space-y-2'>
-                {[1, 2].map((j) => (
-                  <div key={j} className='bg-muted h-24 rounded' />
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+            <div className='bg-muted h-5 w-24 rounded' />
+            <div className='bg-muted h-4 w-16 rounded' />
+            <div className='space-y-2'>
+              {[1, 2, 3].map((j) => (
+                <div key={j} className='bg-muted h-24 rounded' />
+              ))}
+            </div>
+          </div>
         ))}
       </div>
     );
   }
 
+  const stageCount = dealsByStage.length;
+
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
+    <Kanban
+      value={columns}
+      onValueChange={setColumns}
       onDragEnd={handleDragEnd}
+      getItemValue={(deal) => deal.id}
     >
-      <div className='-mx-2 flex gap-4 overflow-x-auto px-2 pb-4'>
-        {dealsByStage.map(({ stage, deals }) => (
-          <Card
-            key={stage.id}
-            className={cn(
-              'w-[280px] flex-shrink-0 transition-colors md:w-[320px]',
-              overStageId === stage.id && 'ring-primary ring-2'
-            )}
-          >
-            <CardHeader className='pb-3'>
-              <div className='flex items-center justify-between gap-2'>
+      <KanbanBoard
+        className={cn(
+          'grid auto-rows-fr gap-4 !h-auto',
+          stageCount === 1 && 'grid-cols-1',
+          stageCount === 2 && 'grid-cols-1 sm:grid-cols-2',
+          stageCount === 3 && 'grid-cols-1 sm:grid-cols-3',
+          stageCount === 4 && 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4',
+          stageCount === 5 && 'grid-cols-1 sm:grid-cols-3 lg:grid-cols-5',
+          stageCount >= 6 && 'grid-cols-1 sm:grid-cols-3 lg:grid-cols-6'
+        )}
+      >
+        {Object.entries(columns).map(([stageId, deals]) => {
+          const stage = stages.find((s) => s.id === stageId);
+          if (!stage) return null;
+
+          return (
+            <KanbanColumn key={stageId} value={stageId}>
+              <div className='flex items-center justify-between'>
                 <div className='flex items-center gap-2'>
-                  <CardTitle className='text-base font-medium'>
-                    {stage.name}
-                  </CardTitle>
-                  <Badge variant='secondary'>{deals.length}</Badge>
+                  <span className='font-semibold text-sm'>{stage.name}</span>
+                  <Badge
+                    variant='secondary'
+                    className='pointer-events-none rounded-sm'
+                  >
+                    {deals.length}
+                  </Badge>
                 </div>
 
-                {/* Quick Add Button */}
-                {onQuickAddClick && (
-                  <Button
-                    size='icon'
-                    variant='ghost'
-                    className='h-7 w-7 flex-shrink-0'
-                    onClick={() => onQuickAddClick(stage.id)}
-                    title={`Add deal to ${stage.name}`}
-                  >
-                    <IconPlus className='h-4 w-4' />
-                  </Button>
+                <div className='flex items-center'>
+                  <KanbanColumnHandle asChild>
+                    <Button variant='ghost' size='icon' className='h-7 w-7'>
+                      <IconGripVertical className='h-4 w-4' />
+                    </Button>
+                  </KanbanColumnHandle>
+                  {onQuickAddClick && (
+                    <Button
+                      size='icon'
+                      variant='ghost'
+                      className='h-7 w-7 flex-shrink-0'
+                      onClick={() => onQuickAddClick(stageId)}
+                      title={`Add deal to ${stage.name}`}
+                    >
+                      <IconPlus className='h-4 w-4' />
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <div className='flex flex-col gap-2 p-0.5'>
+                {deals.map((deal) => (
+                  <KanbanItem key={deal.id} value={deal.id} asHandle asChild>
+                    <div className='rounded-md border bg-card p-3 shadow-xs'>
+                      <DealCard deal={deal} onClick={onDealClick} />
+                    </div>
+                  </KanbanItem>
+                ))}
+                {deals.length === 0 && (
+                  <div className='text-muted-foreground py-8 text-center text-sm'>
+                    Drop deals here
+                  </div>
                 )}
               </div>
-              <div className='text-muted-foreground text-sm'>
-                {formatCurrency(getTotalValue(deals))}
-              </div>
-            </CardHeader>
-            <CardContent className='pt-0'>
-              <ScrollArea className='h-[calc(100vh-300px)]'>
-                <SortableContext
-                  id={stage.id}
-                  items={deals.map((d) => d.id)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  <DroppableStageZone
-                    id={stage.id}
-                    isOver={overStageId === stage.id}
-                  >
-                    {deals.map((deal) => (
-                      <DealCard
-                        key={deal.id}
-                        deal={deal}
-                        isDragging={activeId === deal.id}
-                        onClick={onDealClick}
-                      />
-                    ))}
-                    {deals.length === 0 && (
-                      <div className='text-muted-foreground py-8 text-center text-sm'>
-                        Drop deals here
-                      </div>
-                    )}
-                  </DroppableStageZone>
-                </SortableContext>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+            </KanbanColumn>
+          );
+        })}
+      </KanbanBoard>
 
-      <DragOverlay>
-        {activeDeal ? <DealCard deal={activeDeal} isDragging /> : null}
-      </DragOverlay>
-    </DndContext>
+      <KanbanOverlay>
+        {({ value }) => {
+          const deal = Object.values(columns)
+            .flat()
+            .find((d) => d.id === value);
+          if (!deal) return null;
+          return (
+            <div className='rounded-md border bg-card p-3 shadow-xs'>
+              <DealCard deal={deal} isDragging />
+            </div>
+          );
+        }}
+      </KanbanOverlay>
+    </Kanban>
   );
 }

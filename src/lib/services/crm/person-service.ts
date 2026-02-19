@@ -1,6 +1,8 @@
 import { BaseService } from '../base-service';
 import { prisma } from '@/lib/db/prisma';
 import { Prisma } from '@prisma/client';
+import { extractDomainFromEmail } from '@/lib/utils/domain';
+import { AuditService, AuditActions } from '../audit-service';
 
 export interface CreatePersonInput {
   firstName: string;
@@ -128,10 +130,35 @@ export class PersonService extends BaseService {
    * Create new person
    */
   async create(input: CreatePersonInput) {
+    let finalOrgId = input.orgId;
+    let autoLinked = false;
+    let autoLinkedDomain: string | undefined;
+
+    // Auto-link to organization by domain if orgId not provided
+    if (!finalOrgId && input.email) {
+      const domain = extractDomainFromEmail(input.email);
+      if (domain) {
+        const org = await prisma.organization.findFirst({
+          where: {
+            tenantId: this.tenantId,
+            domain,
+            deleted: false
+          },
+          select: { id: true, name: true }
+        });
+
+        if (org) {
+          finalOrgId = org.id;
+          autoLinked = true;
+          autoLinkedDomain = domain;
+        }
+      }
+    }
+
     // Validate orgId belongs to tenant if provided (with soft-delete check)
-    if (input.orgId) {
+    if (finalOrgId) {
       const org = await prisma.organization.findUnique({
-        where: { id: input.orgId, deleted: false }
+        where: { id: finalOrgId, deleted: false }
       });
       this.ensureTenantAccess(org);
     }
@@ -139,11 +166,30 @@ export class PersonService extends BaseService {
     const person = await prisma.person.create({
       data: {
         ...input,
+        orgId: finalOrgId,
         tenantId: this.tenantId,
         customData: input.customData || {}
       },
       include: {
         organization: true
+      }
+    });
+
+    AuditService.log({
+      tenantId: this.tenantId,
+      userId: this.userId,
+      action: AuditActions.PERSON_CREATED,
+      module: 'CONTACTS',
+      entityId: person.id,
+      entityType: 'Person',
+      details: {
+        name: `${person.firstName} ${person.lastName}`,
+        email: person.email,
+        orgId: finalOrgId,
+        ...(autoLinked && {
+          autoLinked: true,
+          autoLinkedDomain
+        })
       }
     });
 
@@ -159,10 +205,40 @@ export class PersonService extends BaseService {
     });
     this.ensureTenantAccess(existing);
 
+    let finalOrgId = input.orgId;
+    let autoLinked = false;
+    let autoLinkedDomain: string | undefined;
+
+    // Auto-link to organization by domain if:
+    // 1. orgId not explicitly set (undefined) AND existing person has no orgId
+    // 2. email is being updated or exists
+    if (input.orgId === undefined && !existing?.orgId) {
+      const emailToCheck = input.email !== undefined ? input.email : existing?.email;
+      if (emailToCheck) {
+        const domain = extractDomainFromEmail(emailToCheck);
+        if (domain) {
+          const org = await prisma.organization.findFirst({
+            where: {
+              tenantId: this.tenantId,
+              domain,
+              deleted: false
+            },
+            select: { id: true, name: true }
+          });
+
+          if (org) {
+            finalOrgId = org.id;
+            autoLinked = true;
+            autoLinkedDomain = domain;
+          }
+        }
+      }
+    }
+
     // Validate orgId belongs to active tenant org
-    if (input.orgId) {
+    if (finalOrgId) {
       const org = await prisma.organization.findUnique({
-        where: { id: input.orgId, deleted: false }
+        where: { id: finalOrgId, deleted: false }
       });
       this.ensureTenantAccess(org);
     }
@@ -171,6 +247,7 @@ export class PersonService extends BaseService {
       where: { id },
       data: {
         ...input,
+        ...(finalOrgId !== undefined && { orgId: finalOrgId }),
         ...(input.customData && {
           customData: {
             ...((existing?.customData as object) || {}),
@@ -180,6 +257,23 @@ export class PersonService extends BaseService {
       },
       include: {
         organization: true
+      }
+    });
+
+    AuditService.log({
+      tenantId: this.tenantId,
+      userId: this.userId,
+      action: AuditActions.PERSON_UPDATED,
+      module: 'CONTACTS',
+      entityId: person.id,
+      entityType: 'Person',
+      details: {
+        updatedFields: Object.keys(input),
+        ...(autoLinked && {
+          autoLinked: true,
+          autoLinkedDomain,
+          orgId: finalOrgId
+        })
       }
     });
 
@@ -200,6 +294,20 @@ export class PersonService extends BaseService {
       data: {
         deleted: true,
         deletedAt: new Date()
+      }
+    });
+
+    AuditService.log({
+      tenantId: this.tenantId,
+      userId: this.userId,
+      action: AuditActions.PERSON_DELETED,
+      module: 'CONTACTS',
+      entityId: id,
+      entityType: 'Person',
+      details: {
+        name: `${existing!.firstName} ${existing!.lastName}`,
+        email: existing!.email,
+        orgId: existing!.orgId
       }
     });
 

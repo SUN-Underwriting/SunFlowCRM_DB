@@ -120,6 +120,7 @@ export function CustomFieldsManager({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value='DEAL'>Deals</SelectItem>
+                <SelectItem value='LEAD'>Leads</SelectItem>
                 <SelectItem value='PERSON'>Persons</SelectItem>
                 <SelectItem value='ORGANIZATION'>Organizations</SelectItem>
               </SelectContent>

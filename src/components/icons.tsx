@@ -36,7 +36,8 @@ import {
   IconCrown,
   IconStar,
   IconBox,
-  IconPalette
+  IconPalette,
+  IconBuilding
 } from '@tabler/icons-react';
 
 export type Icon = React.ComponentType<IconProps>;
@@ -83,5 +84,6 @@ export const Icons = {
   contacts: IconUsers,
   activities: IconFile,
   emails: IconFileText,
-  crmSettings: IconSettings
+  crmSettings: IconSettings,
+  building: IconBuilding
 };

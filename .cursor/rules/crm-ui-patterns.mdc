@@ -1,0 +1,49 @@
+---
+description: CRM UI patterns (Pipedrive-like): tables, filters, DnD, dialogs
+globs: src/**/crm/**/*.tsx
+alwaysApply: false
+---
+
+# CRM UI Patterns (ориентир: Pipedrive)
+
+Эти правила применяются при работе с CRM UI в `src/**/crm/**/*.tsx` (Deals/Leads/Contacts/Activities/Settings).
+
+## 1) URL-synced state (nuqs)
+
+- List screens должны хранить ключевые параметры в URL:
+  - `q` (search), `status`, `owner`, `type`, `page`, `pageSize`, `sortBy`, `sortDesc` и т.п.
+- Поиск:
+  - обновление URL должно быть **debounced/throttled** (чтобы не “дергать” URL на каждый символ).
+- При изменении фильтров **сбрасывать pageIndex/page** на 0.
+- Не использовать “скрытые” локальные фильтры, которые не отображаются в URL, если это список данных.
+
+## 2) Таблицы (TanStack Table)
+
+- Для tables на list pages:
+  - поддерживать **manualPagination/manualSorting/manualFiltering** (server-side паттерн),
+  - показывать **сортировку в header UI** (клик по заголовку + индикатор),
+  - добавлять **rowSelection** (checkbox column) для bulk действий,
+  - добавлять **row actions** (контекстные действия по строке).
+- При наличии bulk selection показывать bulk action bar:
+  - “N selected” + действия (assign owner / archive / mark done / etc).
+- В destructive операциях использовать `AlertDialog`, а не `window.confirm`.
+
+## 3) Deals pipeline board (dnd-kit)
+
+- Drag должен быть предсказуемым:
+  - использовать **activation constraints** (distance/delay) чтобы избежать случайных переносов,
+  - по возможности использовать **drag handle/activator** вместо “вся карточка draggable”,
+  - `DragOverlay` держать смонтированным (условно рендерить content, но не сам компонент).
+- Клик по карточке должен открывать details, не стартовать drag.
+
+## 4) Detail sheets
+
+- Sheet должен быть “рабочим местом”, а не только просмотром:
+  - быстрые действия (edit/convert/mark status),
+  - связанный контент (timeline activities/emails) — хотя бы MVP.
+
+## 5) Консистентность
+
+- Один язык UI для CRM (EN или RU) — не смешивать на одном экране.
+- Единый формат дат/валют на CRM экранах.
+

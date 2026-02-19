@@ -15,14 +15,26 @@ export async function GET(request: NextRequest) {
 
       const { searchParams } = new URL(request.url);
       const search = searchParams.get('search') || undefined;
+      const domain = searchParams.get('domain') || undefined;
+      const ownerId = searchParams.get('ownerId') || undefined;
+      const countryCode = searchParams.get('countryCode') || undefined;
+      const city = searchParams.get('city') || undefined;
       const industry = searchParams.get('industry') || undefined;
       const size = searchParams.get('size') || undefined;
+      const sortBy = searchParams.get('sortBy') || undefined;
+      const sortDesc = searchParams.get('sortDesc') === 'true';
       const { skip, take } = parsePagination(searchParams);
 
       const result = await service.list({
         search,
+        domain,
+        ownerId,
+        countryCode,
+        city,
         industry,
         size,
+        sortBy,
+        sortDesc,
         skip,
         take
       });

@@ -22,6 +22,8 @@ export interface OrganizationsFilters {
   search?: string;
   skip?: number;
   take?: number;
+  sortBy?: string;
+  sortDesc?: boolean;
 }
 
 /**

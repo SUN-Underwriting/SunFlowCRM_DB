@@ -75,6 +75,11 @@ export const navItems: NavItem[] = [
         icon: 'contacts'
       },
       {
+        title: 'Organizations',
+        url: '/dashboard/crm/contacts/organizations',
+        icon: 'building'
+      },
+      {
         title: 'Activities',
         url: '/dashboard/crm/activities',
         icon: 'activities'

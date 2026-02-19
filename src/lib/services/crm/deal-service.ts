@@ -2,16 +2,27 @@ import { BaseService } from '../base-service';
 import { prisma } from '@/lib/db/prisma';
 import { Prisma, DealStatus } from '@prisma/client';
 import { ValidationError, BusinessRuleError } from '@/lib/errors/app-errors';
+import { AuditService, AuditActions } from '../audit-service';
+import { publishOutboxEvent } from '@/server/notifications/outbox';
+import { enqueueOutboxJob } from '@/server/notifications/queue';
+import { NotificationEventType } from '@/server/notifications/types';
 
 export interface CreateDealInput {
   title: string;
   pipelineId: string;
   stageId: string;
+  ownerId?: string; // If not provided, defaults to current userId
   personId?: string;
   orgId?: string;
   value?: number;
   currency?: string;
   expectedCloseDate?: Date;
+  // V2 fields (PR-1)
+  source?: string; // Business source: inbound_call, email, web_form, partner, etc.
+  externalSourceId?: string; // ID in external system
+  visibility?: 'OWNER' | 'TEAM' | 'COMPANY'; // Defaults to COMPANY
+  priority?: 'LOW' | 'NORMAL' | 'HIGH';
+  renewalType?: string; // one_time, renewal, new_business
   customData?: Record<string, any>;
 }
 
@@ -19,6 +30,7 @@ export interface UpdateDealInput {
   title?: string;
   pipelineId?: string;
   stageId?: string;
+  ownerId?: string;
   personId?: string;
   orgId?: string;
   value?: number;
@@ -26,6 +38,13 @@ export interface UpdateDealInput {
   status?: DealStatus;
   expectedCloseDate?: Date;
   lostReason?: string;
+  // V2 fields (PR-1)
+  source?: string;
+  externalSourceId?: string;
+  visibility?: 'OWNER' | 'TEAM' | 'COMPANY';
+  priority?: 'LOW' | 'NORMAL' | 'HIGH';
+  probability?: number; // 0-100, manual override of stage probability
+  renewalType?: string;
   customData?: Record<string, any>;
 }
 
@@ -130,8 +149,19 @@ export class DealService extends BaseService {
             email: true
           }
         },
+        creator: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true
+          }
+        },
         person: true,
-        organization: true
+        organization: true,
+        _count: {
+          select: { activities: true, notes: true }
+        }
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -219,11 +249,22 @@ export class DealService extends BaseService {
       this.ensureTenantAccess(org);
     }
 
+    // Validate ownerId if provided
+    const ownerId = input.ownerId || this.userId;
+    if (input.ownerId) {
+      const owner = await prisma.user.findUnique({
+        where: { id: input.ownerId }
+      });
+      this.ensureTenantAccess(owner);
+    }
+
     const deal = await prisma.deal.create({
       data: {
         ...input,
         tenantId: this.tenantId,
-        ownerId: this.userId,
+        ownerId,
+        creatorId: this.userId,
+        stageChangeTime: new Date(),
         value: input.value ?? 0,
         customData: input.customData || {}
       },
@@ -233,6 +274,22 @@ export class DealService extends BaseService {
         owner: true,
         person: true,
         organization: true
+      }
+    });
+
+    await AuditService.log({
+      tenantId: this.tenantId,
+      userId: this.userId,
+      action: AuditActions.DEAL_CREATED,
+      module: 'DEALS',
+      entityId: deal.id,
+      entityType: 'Deal',
+      details: {
+        title: deal.title,
+        value: deal.value.toString(),
+        currency: deal.currency,
+        pipelineId: deal.pipelineId,
+        stageId: deal.stageId
       }
     });
 
@@ -280,10 +337,19 @@ export class DealService extends BaseService {
       this.ensureTenantAccess(org);
     }
 
+    // Track changed fields for audit
+    const updatedFields = Object.keys(input).filter(
+      (key) => input[key as keyof UpdateDealInput] !== undefined
+    );
+
     const deal = await prisma.deal.update({
       where: { id },
       data: {
         ...input,
+        // Update stageChangeTime if stage is changing
+        ...(input.stageId && input.stageId !== existing!.stageId && {
+          stageChangeTime: new Date()
+        }),
         ...(input.customData && {
           customData: {
             ...((existing?.customData as object) || {}),
@@ -298,6 +364,16 @@ export class DealService extends BaseService {
         person: true,
         organization: true
       }
+    });
+
+    await AuditService.log({
+      tenantId: this.tenantId,
+      userId: this.userId,
+      action: AuditActions.DEAL_UPDATED,
+      module: 'DEALS',
+      entityId: id,
+      entityType: 'Deal',
+      details: { updatedFields }
     });
 
     return deal;
@@ -325,11 +401,13 @@ export class DealService extends BaseService {
     }
 
     // Check if stage indicates won/lost
+    const now = new Date();
     const updateData: Prisma.DealUpdateInput = {
       stage: {
         connect: { id: stageId }
       },
-      updatedAt: new Date()
+      stageChangeTime: now,
+      updatedAt: now
     };
 
     // Auto-update status based on stage probability (stage is non-null after ensureTenantAccess)
@@ -342,15 +420,83 @@ export class DealService extends BaseService {
       updateData.lostAt = new Date();
     }
 
-    const deal = await prisma.deal.update({
-      where: { id },
-      data: updateData,
-      include: {
-        pipeline: true,
-        stage: true,
-        owner: true,
-        person: true,
-        organization: true
+    // timeout raised: this tx has up to 3 DB operations (deal update + 2 outbox inserts)
+    const { deal, outboxIds } = await prisma.$transaction(async (tx) => {
+      const updated = await tx.deal.update({
+        where: { id },
+        data: updateData,
+        include: {
+          pipeline: true,
+          stage: true,
+          owner: true,
+          person: true,
+          organization: true
+        }
+      });
+
+      const ids: string[] = [];
+
+      ids.push(await publishOutboxEvent(tx, {
+        tenantId: this.tenantId,
+        actorUserId: this.userId,
+        type: NotificationEventType.DEAL_STAGE_CHANGED,
+        entityKind: 'deal',
+        entityId: id,
+        payload: {
+          dealTitle: existing!.title,
+          stageName: stage!.name,
+          fromStageId: existing!.stageId,
+          toStageId: stageId,
+          ownerId: existing!.ownerId,
+        },
+      }));
+
+      if (updateData.status === DealStatus.WON) {
+        ids.push(await publishOutboxEvent(tx, {
+          tenantId: this.tenantId,
+          actorUserId: this.userId,
+          type: NotificationEventType.DEAL_WON,
+          entityKind: 'deal',
+          entityId: id,
+          payload: {
+            dealTitle: existing!.title,
+            ownerId: existing!.ownerId,
+          },
+        }));
+      } else if (updateData.status === DealStatus.LOST) {
+        ids.push(await publishOutboxEvent(tx, {
+          tenantId: this.tenantId,
+          actorUserId: this.userId,
+          type: NotificationEventType.DEAL_LOST,
+          entityKind: 'deal',
+          entityId: id,
+          payload: {
+            dealTitle: existing!.title,
+            ownerId: existing!.ownerId,
+          },
+        }));
+      }
+
+      return { deal: updated, outboxIds: ids };
+    }, { timeout: 10000, maxWait: 5000 });
+
+    outboxIds.forEach((oid) => enqueueOutboxJob(oid));
+
+    await AuditService.log({
+      tenantId: this.tenantId,
+      userId: this.userId,
+      action: AuditActions.DEAL_MOVED,
+      module: 'DEALS',
+      entityId: id,
+      entityType: 'Deal',
+      details: {
+        fromStageId: existing!.stageId,
+        toStageId: stageId,
+        fromStageName: existing!.stage?.name,
+        toStageName: stage!.name,
+        statusChange: updateData.status
+          ? { from: existing!.status, to: updateData.status }
+          : undefined
       }
     });
 
@@ -366,11 +512,47 @@ export class DealService extends BaseService {
     });
     this.ensureTenantAccess(existing);
 
-    const deal = await prisma.deal.update({
-      where: { id },
-      data: {
-        status: DealStatus.WON,
-        wonAt: new Date()
+    const now = new Date();
+    const { deal, outboxId } = await prisma.$transaction(async (tx) => {
+      const updated = await tx.deal.update({
+        where: { id },
+        data: {
+          status: DealStatus.WON,
+          wonAt: now,
+          ...((!existing!.firstWonTime && !existing!.wonAt) && { firstWonTime: now })
+        }
+      });
+
+      const oid = await publishOutboxEvent(tx, {
+        tenantId: this.tenantId,
+        actorUserId: this.userId,
+        type: NotificationEventType.DEAL_WON,
+        entityKind: 'deal',
+        entityId: id,
+        payload: {
+          dealTitle: existing!.title,
+          ownerId: existing!.ownerId,
+          value: existing!.value.toString(),
+          currency: existing!.currency,
+        },
+      });
+
+      return { deal: updated, outboxId: oid };
+    });
+
+    enqueueOutboxJob(outboxId);
+
+    await AuditService.log({
+      tenantId: this.tenantId,
+      userId: this.userId,
+      action: AuditActions.DEAL_WON,
+      module: 'DEALS',
+      entityId: id,
+      entityType: 'Deal',
+      details: {
+        title: existing!.title,
+        value: existing!.value.toString(),
+        currency: existing!.currency
       }
     });
 
@@ -386,12 +568,100 @@ export class DealService extends BaseService {
     });
     this.ensureTenantAccess(existing);
 
+    const { deal, outboxId } = await prisma.$transaction(async (tx) => {
+      const updated = await tx.deal.update({
+        where: { id },
+        data: {
+          status: DealStatus.LOST,
+          lostAt: new Date(),
+          lostReason: reason
+        }
+      });
+
+      const oid = await publishOutboxEvent(tx, {
+        tenantId: this.tenantId,
+        actorUserId: this.userId,
+        type: NotificationEventType.DEAL_LOST,
+        entityKind: 'deal',
+        entityId: id,
+        payload: {
+          dealTitle: existing!.title,
+          ownerId: existing!.ownerId,
+          value: existing!.value.toString(),
+          currency: existing!.currency,
+        },
+      });
+
+      return { deal: updated, outboxId: oid };
+    });
+
+    enqueueOutboxJob(outboxId);
+
+    await AuditService.log({
+      tenantId: this.tenantId,
+      userId: this.userId,
+      action: AuditActions.DEAL_LOST,
+      module: 'DEALS',
+      entityId: id,
+      entityType: 'Deal',
+      details: {
+        title: existing!.title,
+        value: existing!.value.toString(),
+        currency: existing!.currency,
+        reason
+      }
+    });
+
+    return deal;
+  }
+
+  /**
+   * Reopen a closed deal (WON or LOST back to OPEN)
+   */
+  async reopen(id: string) {
+    const existing = await prisma.deal.findUnique({
+      where: { id, deleted: false },
+      include: { stage: true }
+    });
+    this.ensureTenantAccess(existing);
+
+    if (!existing || existing.status === DealStatus.OPEN) {
+      throw new BusinessRuleError('Deal is not in a closed state');
+    }
+
+    // Preserve firstWonTime if it was won before
+    const updateData: Prisma.DealUpdateInput = {
+      status: DealStatus.OPEN,
+      wonAt: null,
+      lostAt: null,
+      lostReason: null,
+      // If this was a won deal and firstWonTime is not set, set it now
+      ...(existing.status === DealStatus.WON &&
+        !existing.firstWonTime && { firstWonTime: existing.wonAt })
+    };
+
     const deal = await prisma.deal.update({
       where: { id },
-      data: {
-        status: DealStatus.LOST,
-        lostAt: new Date(),
-        lostReason: reason
+      data: updateData,
+      include: {
+        pipeline: true,
+        stage: true,
+        owner: true,
+        person: true,
+        organization: true
+      }
+    });
+
+    await AuditService.log({
+      tenantId: this.tenantId,
+      userId: this.userId,
+      action: AuditActions.DEAL_REOPENED,
+      module: 'DEALS',
+      entityId: id,
+      entityType: 'Deal',
+      details: {
+        previousStatus: existing.status,
+        title: existing.title
       }
     });
 
@@ -412,6 +682,18 @@ export class DealService extends BaseService {
       data: {
         deleted: true,
         deletedAt: new Date()
+      }
+    });
+
+    await AuditService.log({
+      tenantId: this.tenantId,
+      userId: this.userId,
+      action: AuditActions.DEAL_DELETED,
+      module: 'DEALS',
+      entityId: id,
+      entityType: 'Deal',
+      details: {
+        title: existing!.title
       }
     });
 

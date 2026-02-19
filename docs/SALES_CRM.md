@@ -1,54 +1,237 @@
-# Sales CRM Module
+# Sales CRM Module - Основной документ
 
-This module provides a comprehensive Sales CRM system integrated into the SunApp AG dashboard.
+## 📌 Быстрые ссылки
 
-## Features
+Для полной документации по CRM модулю, пожалуйста, обратитесь к подробной документации в папке `docs/CRM/`:
 
-### 1. Dashboard
-- **Overview**: Visual representation of sales performance, including pipeline value, recent activity, and key metrics.
-- **Widgets**: Customizable widgets for tracking goals and KPIs.
+- **[README.md](./CRM/README.md)** - Начните отсюда! Полный индекс и руководство
+- **[CRM_OVERVIEW.md](./CRM/CRM_OVERVIEW.md)** - Общий обзор архитектуры и концепций
+- **[CRM_MODULES.md](./CRM/CRM_MODULES.md)** - Подробное описание всех подразделов
+- **[CRM_DATABASE.md](./CRM/CRM_DATABASE.md)** - Полная схема БД и модели данных
+- **[CRM_COMPONENTS.md](./CRM/CRM_COMPONENTS.md)** - Справочник UI компонентов
+- **[CRM_API.md](./CRM/CRM_API.md)** - REST API документация
 
-### 2. Lead Management (`/leads`)
-- **Lead Capture**: Tools for capturing leads from various sources.
-- **Lead Scoring**: Automated scoring to prioritize high-potential leads.
-- **Status Tracking**: Kanban and list views for tracking lead status (New, Contacted, Qualified, etc.).
+---
 
-### 3. Contact Management (`/contacts`)
-- **Centralized Database**: Store and manage all customer contact information.
-- **Interaction History**: Log calls, emails, and meetings.
-- **Organization Support**: Link contacts to companies/organizations.
+## 🎯 Обзор функциональности
 
-### 4. Deal Pipeline (`/deals`)
-- **Visual Pipeline**: Drag-and-drop Kanban board for managing deals through stages.
-- **Stage Customization**: Configurable deal stages to match your sales process.
-- **Forecasting**: Revenue forecasting based on deal value and probability.
+Модуль Sales CRM предоставляет комплексную систему управления продажами, встроённую в платформу SunApp AG.
 
-### 5. Activities (`/activities`)
-- **Task Management**: Schedule and track calls, meetings, and emails.
-- **Calendar Integration**: Sync activities with a calendar view.
-- **Reminders**: Automated notifications for upcoming tasks.
+### Основные возможности
 
-### 6. Email Integration (`/emails`)
-- **Inbox**: Integrated email client for sales correspondence.
-- **Templates**: Reusable email templates for common communications.
-- **Tracking**: Track email opens and clicks.
+#### 1. Dashboard (Главная панель)
+- **Визуализация**: Графическое представление производительности продаж
+- **Ключевые метрики**: KPI по конвейерам, сделкам, лидам
+- **Виджеты**: Дополнительные виджеты для отслеживания целей
 
-### 7. Settings (`/settings`)
-- **Configuration**: module-specific settings.
+**Модуль:** `src/features/crm/dashboard/`
 
-## Technical Structure
+#### 2. Lead Management (Управление лидами)
+- **Захват лидов**: Добавление лидов из различных источников
+- **Квалификация**: Отслеживание статуса лидов (NEW → IN_PROGRESS → CONVERTED/ARCHIVED)
+- **Конвертация**: Автоматическое преобразование лидов в сделки
 
-The module is located in `src/features/crm` and follows the feature-based architecture.
+**Модуль:** `src/features/crm/leads/`
 
-- **Components**: Reusable UI components specific to CRM.
-- **Hooks**: Custom React hooks for CRM logic (e.g., `useLeads`, `useDeals`).
-- **Types**: TypeScript definitions for CRM entities.
-- **Utils**: Helper functions for CRM data processing.
+#### 3. Contact Management (Управление контактами)
+- **Централизованная БД**: Единое хранилище контактов (организации и физ. лица)
+- **История взаимодействий**: Логирование звонков, писем, встреч
+- **Организационная структура**: Связь контактов с компаниями
 
-## Database Models
-The module uses the following Prisma models (see `schema.prisma`):
-- `Lead`
-- `Contact`
-- `Deal`
-- `Activity`
-- `Organization`
+**Модуль:** `src/features/crm/contacts/`
+
+#### 4. Deal Pipeline (Конвейер продаж)
+- **Канбан доска**: Визуальное управление сделками по этапам
+- **Настраиваемые этапы**: Конфигурируемые процессы продаж
+- **Прогнозирование**: Аналитика на основе стоимости и вероятности сделок
+
+**Модуль:** `src/features/crm/deals/`
+
+#### 5. Activities (Управление активностями)
+- **Управление задачами**: Планирование звонков, встреч, задач
+- **Календарь**: Интеграция с календарным видом
+- **Напоминания**: Уведомления о предстоящих активностях
+
+**Модуль:** `src/features/crm/activities/`
+
+#### 6. Email Integration (Интеграция почты)
+- **Синхронизация**: Gmail, Outlook, IMAP интеграция
+- **Автолинкинг**: Автоматическое связывание писем с контактами/сделками
+- **Отслеживание**: Отслеживание открытий и кликов в письмах
+
+**Модуль:** `src/features/crm/emails/`
+
+#### 7. Settings (Конфигурация)
+- **Конвейеры**: Создание и управление процессами продаж
+- **Этапы**: Настройка этапов конвейера
+- **Пользовательские поля**: Расширение моделей данных под специфику бизнеса
+
+**Модуль:** `src/features/crm/settings/`
+
+---
+
+## 🏗️ Техническая структура
+
+### Расположение кода
+
+```
+src/features/crm/
+├── dashboard/           # Главная панель управления
+├── contacts/            # Управление организациями и контактами
+├── leads/               # Управление лидами
+├── deals/               # Управление сделками (канбан доска)
+├── activities/          # Управление активностями
+├── emails/              # Интеграция электронной почты
+└── settings/            # Конфигурация (конвейеры, этапы, поля)
+```
+
+### Компоненты и структура
+
+- **Components**: React компоненты для UI (таблицы, формы, диалоги)
+- **Hooks**: Custom React hooks для управления состоянием (`useLeads`, `useDeals` и т.д.)
+- **Types**: TypeScript типы и интерфейсы
+- **Utils**: Вспомогательные функции для обработки данных
+
+### База данных
+
+CRM использует Prisma ORM с PostgreSQL и следующие основные модели:
+
+```typescript
+- Organization   // Организация/компания
+- Person         // Контактное лицо
+- Pipeline       // Процесс продаж (конвейер)
+- Stage          // Этап конвейера
+- Deal           // Сделка
+- Lead           // Лид
+- Activity       // Активность (звонок, встреча, задача)
+- Email          // Электронное письмо
+- FieldDefinition // Пользовательское поле
+```
+
+---
+
+## 🔄 Ключевые рабочие процессы
+
+### Цикл жизни лида
+
+```
+NEW → IN_PROGRESS → CONVERTED (в Deal) / ARCHIVED
+```
+
+1. Создание лида из различных источников
+2. Квалификация и проведение активностей
+3. Конвертация в сделку или архивирование
+
+### Цикл жизни сделки
+
+```
+OPEN (в различных этапах) → WON / LOST
+```
+
+1. Создание сделки (обычно из лида)
+2. Перемещение по этапам конвейера
+3. Закрытие как выигранная или проигранная
+
+---
+
+## 🔐 Безопасность и мультитенантность
+
+- **Полная изоляция**: Данные каждого клиента полностью отделены через `tenantId`
+- **Мягкое удаление**: Вместо физического удаления используется флаг `deleted`
+- **Контроль доступа**: Основан на ролях пользователя (ADMIN, MANAGER, SALES, MEMBER)
+- **Аудит**: Все критические операции логируются в `AuditLog`
+
+---
+
+## 📊 База данных
+
+### Основные таблицы
+
+| Таблица | Описание | Взаимосвязи |
+|---------|---------|-----------|
+| `organizations` | Компании/организации | 1:N с Person, Deal, Lead, Activity, Email |
+| `persons` | Контакты (физ. лица) | N:1 с Organization; 1:N с Deal, Lead, Activity, Email |
+| `pipelines` | Процессы продаж | 1:N с Stage, Deal |
+| `stages` | Этапы конвейера | N:1 с Pipeline; 1:N с Deal |
+| `deals` | Сделки | N:1 с Pipeline, Stage, User, Person, Organization |
+| `leads` | Лиды | N:1 с User, Person, Organization |
+| `activities` | Активности | N:1 с User, Deal, Person, Organization |
+| `emails` | Электронные письма | N:1 с User, EmailAccount, Deal, Person, Organization |
+| `email_accounts` | Подключённые почтовые аккаунты | N:1 с User |
+| `field_definitions` | Пользовательские поля | 1:N через customData JSON |
+
+### Индексирование
+
+Все таблицы оптимизированы для быстрого поиска:
+- По `tenantId` (мультитенантность)
+- По `deleted` (soft delete)
+- По статусам и датам
+- По внешним ключам
+
+---
+
+## 🚀 API Endpoints
+
+CRM предоставляет REST API для всех операций. Основные группы:
+
+- **Organizations** - `/api/crm/organizations`
+- **Persons** - `/api/crm/persons`
+- **Leads** - `/api/crm/leads`
+- **Deals** - `/api/crm/deals`
+- **Activities** - `/api/crm/activities`
+- **Emails** - `/api/crm/emails`
+- **Pipelines** - `/api/crm/pipelines`
+- **Stages** - `/api/crm/stages`
+- **Custom Fields** - `/api/crm/field-definitions`
+- **Analytics** - `/api/crm/analytics`
+
+Все endpoints требуют аутентификации и поддерживают пагинацию, фильтрацию и сортировку.
+
+---
+
+## 📚 Дополнительные ресурсы
+
+### Разработка frontend
+
+1. Изучите [CRM_COMPONENTS.md](./CRM/CRM_COMPONENTS.md) для справочника компонентов
+2. Посмотрите примеры использования hooks
+3. Используйте shadcn/ui для консистентности
+
+### Разработка backend
+
+1. Изучите [CRM_DATABASE.md](./CRM/CRM_DATABASE.md) для схемы БД
+2. Посмотрите [CRM_API.md](./CRM/CRM_API.md) для примеров endpoints
+3. Следуйте существующим паттернам
+
+### Интеграция с другими системами
+
+1. Используйте API endpoints для интеграции
+2. Посмотрите [CRM_API.md](./CRM/CRM_API.md) для примеров SDKs
+
+---
+
+## 📋 Текущий статус
+
+**Версия:** 1.0.0 (Feb 2024)
+
+**Реализованные возможности:**
+- ✅ Управление организациями и контактами
+- ✅ Управление лидами с конвертацией
+- ✅ Канбан доска для сделок
+- ✅ Управление активностями
+- ✅ Интеграция электронной почты (Gmail, Outlook, IMAP)
+- ✅ Пользовательские поля для гибкости
+- ✅ Dashboard с KPI и аналитикой
+- ✅ Мультитенантность и контроль доступа
+- ✅ Аудит всех операций
+
+**Планируемые улучшения:**
+- 📅 Расширенная аналитика и отчёты
+- 📅 Мобильное приложение
+- 📅 Интеграция с календарём
+- 📅 AI-powered lead scoring
+- 📅 Автоматизация рабочих процессов
+
+---
+
+**Последнее обновление:** 16 февраля 2024

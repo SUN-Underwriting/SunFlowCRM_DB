@@ -32,18 +32,20 @@ export function CreateLeadDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='sm:max-w-[600px]'>
+      <DialogContent className='sm:max-w-[820px]'>
         <DialogHeader>
           <DialogTitle>Create New Lead</DialogTitle>
           <DialogDescription>
-            Add a new lead to your pipeline. Fill in the details below.
+            Add a new lead and capture the key context up front.
           </DialogDescription>
         </DialogHeader>
-        <LeadForm
-          onSubmit={handleSubmit}
-          onCancel={() => onOpenChange(false)}
-          isLoading={createLead.isPending}
-        />
+        <div className='max-h-[75vh] overflow-auto pr-1'>
+          <LeadForm
+            onSubmit={handleSubmit}
+            onCancel={() => onOpenChange(false)}
+            isLoading={createLead.isPending}
+          />
+        </div>
       </DialogContent>
     </Dialog>
   );

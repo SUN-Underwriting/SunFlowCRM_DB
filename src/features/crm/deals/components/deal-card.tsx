@@ -1,11 +1,13 @@
 'use client';
 
-import { useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import React from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { IconBuilding, IconUser, IconGripVertical } from '@tabler/icons-react';
+import {
+  IconPaperclip,
+  IconMessageCircle2
+} from '@tabler/icons-react';
 import { formatCurrency } from '@/lib/format-currency';
 import type { DealWithRelations } from '@/lib/api/crm-types';
 
@@ -15,93 +17,142 @@ interface DealCardProps {
   onClick?: (deal: DealWithRelations) => void;
 }
 
-export function DealCard({ deal, isDragging, onClick }: DealCardProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging: isSortableDragging
-  } = useSortable({ id: deal.id });
+const PRIORITY_STYLES: Record<string, { bg: string; text: string }> = {
+  HIGH: { bg: 'bg-zinc-900 dark:bg-zinc-100', text: 'text-white dark:text-zinc-900' },
+  NORMAL: { bg: 'bg-zinc-200 dark:bg-zinc-700', text: 'text-zinc-700 dark:text-zinc-200' },
+  LOW: { bg: 'bg-zinc-100 dark:bg-zinc-800', text: 'text-zinc-500 dark:text-zinc-400' }
+};
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition
-  };
+function getInitials(firstName?: string | null, lastName?: string | null) {
+  return `${firstName?.[0] || ''}${lastName?.[0] || ''}`.toUpperCase() || '?';
+}
 
-  const getInitials = (firstName?: string, lastName?: string) => {
-    return `${firstName?.[0] || ''}${lastName?.[0] || ''}`.toUpperCase() || '?';
-  };
+function probabilityColor(pct: number) {
+  if (pct >= 80) return 'text-green-500';
+  if (pct >= 40) return 'text-amber-500';
+  return 'text-zinc-400';
+}
 
+export const DealCard = React.memo(function DealCard({
+  deal,
+  isDragging,
+  onClick
+}: DealCardProps) {
   const contactName = deal.person
-    ? `${deal.person.firstName} ${deal.person.lastName}`
-    : deal.organization?.name || 'No contact';
+    ? `${deal.person.firstName || ''} ${deal.person.lastName || ''}`.trim()
+    : deal.organization?.name || null;
 
-  const ownerInitials = deal.owner
-    ? getInitials(
-        deal.owner.firstName || undefined,
-        deal.owner.lastName || undefined
-      )
-    : '?';
+  const probability =
+    deal.probability ?? (deal.stage as { probability?: number })?.probability;
+  const pct = probability != null ? Number(probability) : null;
 
-  const handleClick = (e: React.MouseEvent) => {
-    // Only trigger click if it's not a drag gesture
-    if (onClick && !isSortableDragging) {
-      onClick(deal);
-    }
-  };
+  const notesCount = deal._count?.notes ?? 0;
+  const activitiesCount = deal._count?.activities ?? 0;
+  const priority = deal.priority as string | null | undefined;
+  const priorityStyle = priority ? PRIORITY_STYLES[priority] : null;
 
   return (
-    <Card
-      ref={setNodeRef}
-      style={style}
-      onClick={handleClick}
+    <div
+      onClick={onClick ? () => onClick(deal) : undefined}
       className={cn(
-        'transition-shadow hover:shadow-md',
-        (isDragging || isSortableDragging) && 'opacity-50',
-        onClick && 'hover:ring-primary/50 cursor-pointer hover:ring-1'
+        'flex flex-col gap-3',
+        isDragging && 'opacity-60',
+        onClick && 'cursor-pointer'
       )}
     >
-      <CardHeader className='pb-3'>
-        <div className='flex items-start gap-2'>
-          {/* Drag Handle */}
-          <button
-            ref={setActivatorNodeRef}
-            {...attributes}
-            {...listeners}
-            className='hover:bg-muted mt-0.5 flex-shrink-0 cursor-grab rounded p-0.5 active:cursor-grabbing'
-            onClick={(e) => e.stopPropagation()}
-            aria-label='Drag to move deal'
-          >
-            <IconGripVertical className='text-muted-foreground h-4 w-4' />
-          </button>
+      {/* Title */}
+      <h4 className='line-clamp-2 text-sm font-semibold leading-snug'>
+        {deal.title}
+      </h4>
 
-          {/* Deal Title */}
-          <h4 className='flex-1 text-sm leading-tight font-medium'>
-            {deal.title}
-          </h4>
+      {/* Subtitle: value + contact */}
+      <p className='text-muted-foreground line-clamp-2 text-xs leading-relaxed'>
+        {formatCurrency(deal.value, deal.currency || 'USD')}
+        {contactName && ` · ${contactName}`}
+      </p>
 
-          {/* Owner Avatar */}
-          <Avatar className='h-6 w-6 flex-shrink-0'>
-            <AvatarFallback className='text-xs'>{ownerInitials}</AvatarFallback>
-          </Avatar>
-        </div>
-      </CardHeader>
-      <CardContent className='space-y-2 pt-0'>
-        <div className='text-lg font-semibold'>
-          {formatCurrency(deal.value, deal.currency || 'USD')}
-        </div>
-        <div className='text-muted-foreground flex items-center gap-2 text-sm'>
-          {deal.person ? (
-            <IconUser className='h-4 w-4' />
-          ) : (
-            <IconBuilding className='h-4 w-4' />
+      {/* Middle row: avatar(s) + probability */}
+      <div className='flex items-center justify-between'>
+        <div className='flex -space-x-1.5'>
+          {deal.owner && (
+            <Avatar className='ring-background h-7 w-7 ring-2'>
+              <AvatarFallback className='bg-primary/10 text-primary text-[10px] font-medium'>
+                {getInitials(deal.owner.firstName, deal.owner.lastName)}
+              </AvatarFallback>
+            </Avatar>
           )}
-          <span className='truncate'>{contactName}</span>
+          {deal.creator &&
+            deal.creator.id !== deal.owner?.id && (
+              <Avatar className='ring-background h-7 w-7 ring-2'>
+                <AvatarFallback className='bg-orange-100 text-[10px] font-medium text-orange-600 dark:bg-orange-900 dark:text-orange-300'>
+                  {getInitials(deal.creator.firstName, deal.creator.lastName)}
+                </AvatarFallback>
+              </Avatar>
+            )}
         </div>
-      </CardContent>
-    </Card>
+
+        {pct != null && (
+          <div className='flex items-center gap-1'>
+            <svg viewBox='0 0 20 20' className={cn('h-4 w-4', probabilityColor(pct))}>
+              <circle
+                cx='10'
+                cy='10'
+                r='8'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth='2.5'
+                opacity='0.2'
+              />
+              <circle
+                cx='10'
+                cy='10'
+                r='8'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth='2.5'
+                strokeDasharray={`${(pct / 100) * 50.27} 50.27`}
+                strokeLinecap='round'
+                transform='rotate(-90 10 10)'
+              />
+            </svg>
+            <span className='text-muted-foreground text-xs tabular-nums'>
+              {pct}%
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Bottom row: priority + meta */}
+      <div className='flex items-center justify-between'>
+        {priorityStyle ? (
+          <Badge
+            className={cn(
+              'pointer-events-none rounded-sm px-2 py-0.5 text-[11px] font-medium capitalize',
+              priorityStyle.bg,
+              priorityStyle.text
+            )}
+          >
+            {priority!.charAt(0) + priority!.slice(1).toLowerCase()}
+          </Badge>
+        ) : (
+          <span />
+        )}
+
+        <div className='text-muted-foreground flex items-center gap-2.5 text-xs tabular-nums'>
+          {activitiesCount > 0 && (
+            <span className='flex items-center gap-0.5'>
+              <IconPaperclip className='h-3.5 w-3.5' />
+              {activitiesCount}
+            </span>
+          )}
+          {notesCount > 0 && (
+            <span className='flex items-center gap-0.5'>
+              <IconMessageCircle2 className='h-3.5 w-3.5' />
+              {notesCount}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
   );
-}
+});

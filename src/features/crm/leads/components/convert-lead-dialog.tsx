@@ -20,6 +20,7 @@ import {
   FormMessage
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { MaskInput } from '@/components/ui/mask-input';
 import {
   Select,
   SelectContent,
@@ -234,17 +235,18 @@ export function ConvertLeadDialog({
                   <FormItem>
                     <FormLabel>Deal Value</FormLabel>
                     <FormControl>
-                      <Input
-                        type='number'
-                        placeholder='0'
-                        {...field}
-                        onChange={(e) =>
-                          field.onChange(
-                            e.target.value === ''
-                              ? undefined
-                              : parseFloat(e.target.value)
-                          )
+                      <MaskInput
+                        mask='currency'
+                        currency={form.watch('currency') || 'USD'}
+                        placeholder='$0.00'
+                        value={
+                          field.value != null ? String(field.value) : ''
                         }
+                        onValueChange={(_masked, unmasked) => {
+                          field.onChange(
+                            unmasked === '' ? undefined : parseFloat(unmasked)
+                          );
+                        }}
                       />
                     </FormControl>
                     <FormMessage />
@@ -268,6 +270,7 @@ export function ConvertLeadDialog({
                         <SelectItem value='USD'>USD</SelectItem>
                         <SelectItem value='EUR'>EUR</SelectItem>
                         <SelectItem value='GBP'>GBP</SelectItem>
+                        <SelectItem value='CHF'>CHF</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />

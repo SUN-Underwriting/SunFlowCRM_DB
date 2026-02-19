@@ -5,21 +5,16 @@ import { useQuery } from '@tanstack/react-query';
 import { useQueryStates, parseAsString, parseAsArrayOf } from 'nuqs';
 import { Button } from '@/components/ui/button';
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle
-} from '@/components/ui/card';
-import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { IconPlus } from '@tabler/icons-react';
 import { PipelineBoard } from '@/features/crm/deals/components/pipeline-board';
+import { DealsTable } from '@/features/crm/deals/components/deals-table';
 import { DealsBoardToolbar } from '@/features/crm/deals/components/deals-board-toolbar';
 import { CreateDealDialogEnhanced } from '@/features/crm/deals/components/create-deal-dialog-enhanced';
 import { DealDetailSheet } from '@/features/crm/deals/components/deal-detail-sheet';
@@ -33,6 +28,7 @@ import type {
   DealWithRelations,
   StageWithRelations
 } from '@/lib/api/crm-types';
+import type { PaginationState, SortingState } from '@tanstack/react-table';
 
 /**
  * Deals Page - Kanban Board View
@@ -50,6 +46,14 @@ export default function DealsPage() {
   const [prefilledStageId, setPrefilledStageId] = useState<string | null>(null);
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'kanban' | 'table'>('kanban');
+  
+  // Table state
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 50
+  });
+  const [sorting, setSorting] = useState<SortingState>([]);
 
   // URL-synced filters (nuqs pattern)
   const [filters] = useQueryStates({
@@ -168,7 +172,7 @@ export default function DealsPage() {
   const isLoading = loadingPipelines || loadingDeals;
 
   return (
-    <div className='flex-1 space-y-4 p-4 pt-6 md:p-8'>
+    <div className='flex h-full flex-col space-y-4 p-4 pt-6 md:p-8'>
       <div className='flex items-center justify-between'>
         <div>
           <h2 className='text-3xl font-bold tracking-tight'>Deals</h2>
@@ -182,81 +186,96 @@ export default function DealsPage() {
         </Button>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className='flex items-center justify-between'>
-            <div>
-              <CardTitle>Pipeline View</CardTitle>
-              <CardDescription>
-                Drag and drop deals between stages
-              </CardDescription>
-            </div>
-            {pipelines.length > 0 && (
-              <Select
-                value={selectedPipelineId}
-                onValueChange={setSelectedPipelineId}
-              >
-                <SelectTrigger className='w-[250px]'>
-                  <SelectValue placeholder='Select pipeline' />
-                </SelectTrigger>
-                <SelectContent>
-                  {pipelines.map((pipeline) => (
-                    <SelectItem key={pipeline.id} value={pipeline.id}>
-                      {pipeline.name}
-                      {pipeline.isDefault && ' (Default)'}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          {dealsError ? (
-            <div className='text-destructive py-12 text-center'>
-              {dealsError instanceof Error
-                ? dealsError.message
-                : 'Failed to load deals'}
-            </div>
-          ) : !selectedPipelineId ? (
-            <div className='text-muted-foreground py-12 text-center'>
-              {pipelines.length === 0
-                ? 'No pipelines found. Create a pipeline first.'
-                : 'Select a pipeline to view deals'}
-            </div>
-          ) : (
-            <>
-              {/* Toolbar with search and filters */}
-              <DealsBoardToolbar
-                owners={owners}
-                statuses={['OPEN', 'WON', 'LOST']}
-              />
+      {/* Toolbar row: view switcher + pipeline selector + filters */}
+      <div className='flex items-center justify-between gap-4'>
+        <div className='flex items-center gap-2'>
+          <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'kanban' | 'table')}>
+            <TabsList className='h-9'>
+              <TabsTrigger value='kanban' className='text-xs'>
+                Board
+              </TabsTrigger>
+              <TabsTrigger value='table' className='text-xs'>
+                Table
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
 
-              {/* Pipeline board */}
-              <PipelineBoard
-                stages={selectedPipeline?.stages || []}
-                dealsByStage={dealsByStage}
-                onDealMove={handleDealMove}
-                onDealClick={(deal) => {
-                  setSelectedDealId(deal.id);
-                  setDetailSheetOpen(true);
-                }}
-                onQuickAddClick={handleQuickAdd}
-                isLoading={isLoading}
-              />
-
-              {/* Results info */}
-              {!isLoading &&
-                filteredDeals.length !== dealsData?.deals?.length && (
-                  <div className='text-muted-foreground mt-4 text-center text-sm'>
-                    Showing {filteredDeals.length} of{' '}
-                    {dealsData?.deals?.length || 0} deals
-                  </div>
-                )}
-            </>
+          {viewMode === 'kanban' && pipelines.length > 0 && (
+            <Select
+              value={selectedPipelineId}
+              onValueChange={setSelectedPipelineId}
+            >
+              <SelectTrigger className='w-[250px]'>
+                <SelectValue placeholder='Select pipeline' />
+              </SelectTrigger>
+              <SelectContent>
+                {pipelines.map((pipeline) => (
+                  <SelectItem key={pipeline.id} value={pipeline.id}>
+                    {pipeline.name}
+                    {pipeline.isDefault && ' (Default)'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
-        </CardContent>
-      </Card>
+        </div>
+
+        <DealsBoardToolbar
+          owners={owners}
+          statuses={['OPEN', 'WON', 'LOST']}
+        />
+      </div>
+
+      {/* Content */}
+      {dealsError ? (
+        <div className='text-destructive py-12 text-center'>
+          {dealsError instanceof Error
+            ? dealsError.message
+            : 'Failed to load deals'}
+        </div>
+      ) : viewMode === 'kanban' && !selectedPipelineId ? (
+        <div className='text-muted-foreground py-12 text-center'>
+          {pipelines.length === 0
+            ? 'No pipelines found. Create a pipeline first.'
+            : 'Select a pipeline to view deals'}
+        </div>
+      ) : viewMode === 'kanban' ? (
+        <>
+          <PipelineBoard
+            stages={selectedPipeline?.stages || []}
+            dealsByStage={dealsByStage}
+            onDealMove={handleDealMove}
+            onDealClick={(deal) => {
+              setSelectedDealId(deal.id);
+              setDetailSheetOpen(true);
+            }}
+            onQuickAddClick={handleQuickAdd}
+            isLoading={isLoading}
+          />
+
+          {!isLoading &&
+            filteredDeals.length !== dealsData?.deals?.length && (
+              <div className='text-muted-foreground text-center text-sm'>
+                Showing {filteredDeals.length} of{' '}
+                {dealsData?.deals?.length || 0} deals
+              </div>
+            )}
+        </>
+      ) : (
+        <DealsTable
+          data={filteredDeals}
+          pageCount={Math.ceil(filteredDeals.length / pagination.pageSize)}
+          pagination={pagination}
+          onPaginationChange={setPagination}
+          sorting={sorting}
+          onSortingChange={setSorting}
+          isLoading={isLoading}
+          onRowClick={(deal) => {
+            setSelectedDealId(deal.id);
+            setDetailSheetOpen(true);
+          }}
+        />
+      )}
 
       <CreateDealDialogEnhanced
         open={createDialogOpen}

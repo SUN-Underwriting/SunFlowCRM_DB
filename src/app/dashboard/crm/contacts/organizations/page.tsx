@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -14,32 +15,72 @@ import { IconPlus, IconSearch, IconBuilding } from '@tabler/icons-react';
 import { OrganizationsTable } from '@/features/crm/contacts/components/organizations-table';
 import { OrganizationFormDialog } from '@/features/crm/contacts/components/organization-form-dialog';
 import { useOrganizations } from '@/features/crm/contacts/hooks/use-organizations';
-import { useDebounce } from '@/hooks/use-debounce';
 import type { PaginationState, SortingState } from '@tanstack/react-table';
+import {
+  useQueryStates,
+  parseAsInteger,
+  parseAsString,
+  parseAsBoolean
+} from 'nuqs';
 
 /**
  * Organizations Page
  * Server-side pagination + filtering with React Query + debounced search
  */
 export default function OrganizationsPage() {
+  const router = useRouter();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const debouncedSearch = useDebounce(search, 300);
-  const [pagination, setPagination] = useState<PaginationState>({
-    pageIndex: 0,
-    pageSize: 10
-  });
-  const [sorting, setSorting] = useState<SortingState>([]);
+
+  // URL-synced state with nuqs
+  const [urlState, setUrlState] = useQueryStates(
+    {
+      q: parseAsString.withDefault(''),
+      page: parseAsInteger.withDefault(0),
+      pageSize: parseAsInteger.withDefault(10),
+      sortBy: parseAsString.withDefault('name'),
+      sortDesc: parseAsBoolean.withDefault(false)
+    },
+    {
+      history: 'replace',
+      shallow: true
+    }
+  );
+
+  // Local search state for debouncing
+  const [searchInput, setSearchInput] = useState(urlState.q);
+
+  // Debounce search: update URL after typing stops
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchInput !== urlState.q) {
+        setUrlState({ q: searchInput, page: 0 }); // Reset page on search
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  // Sync pagination state with URL
+  const pagination: PaginationState = {
+    pageIndex: urlState.page,
+    pageSize: urlState.pageSize
+  };
+
+  // Sync sorting state with URL
+  const sorting: SortingState = urlState.sortBy
+    ? [{ id: urlState.sortBy, desc: urlState.sortDesc }]
+    : [];
 
   const { data, isLoading, error } = useOrganizations({
-    search: debouncedSearch,
-    skip: pagination.pageIndex * pagination.pageSize,
-    take: pagination.pageSize
+    search: urlState.q,
+    skip: urlState.page * urlState.pageSize,
+    take: urlState.pageSize,
+    sortBy: urlState.sortBy,
+    sortDesc: urlState.sortDesc
   });
 
   const organizations = data?.organizations || [];
   const total = data?.total || 0;
-  const pageCount = Math.ceil(total / pagination.pageSize);
+  const pageCount = Math.ceil(total / urlState.pageSize);
 
   return (
     <div className='flex-1 space-y-4 p-4 pt-6 md:p-8'>
@@ -69,11 +110,8 @@ export default function OrganizationsPage() {
               <IconSearch className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
               <Input
                 placeholder='Search organizations...'
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setPagination((prev) => ({ ...prev, pageIndex: 0 }));
-                }}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 className='pl-9'
               />
             </div>
@@ -86,7 +124,7 @@ export default function OrganizationsPage() {
                 ? error.message
                 : 'Failed to load organizations'}
             </div>
-          ) : !isLoading && organizations.length === 0 && !debouncedSearch ? (
+          ) : !isLoading && organizations.length === 0 && !urlState.q ? (
             <div className='flex flex-col items-center justify-center py-16 text-center'>
               <IconBuilding className='text-muted-foreground/50 mb-4 h-12 w-12' />
               <h3 className='text-lg font-semibold'>No organizations yet</h3>
@@ -106,10 +144,32 @@ export default function OrganizationsPage() {
               data={organizations}
               pageCount={pageCount}
               pagination={pagination}
-              onPaginationChange={setPagination}
+              onPaginationChange={(updater) => {
+                const newPagination =
+                  typeof updater === 'function' ? updater(pagination) : updater;
+                setUrlState({
+                  page: newPagination.pageIndex,
+                  pageSize: newPagination.pageSize
+                });
+              }}
               sorting={sorting}
-              onSortingChange={setSorting}
+              onSortingChange={(updater) => {
+                const newSorting =
+                  typeof updater === 'function' ? updater(sorting) : updater;
+                const firstSort = newSorting[0];
+                if (firstSort) {
+                  setUrlState({
+                    sortBy: firstSort.id,
+                    sortDesc: firstSort.desc
+                  });
+                } else {
+                  setUrlState({ sortBy: 'name', sortDesc: false });
+                }
+              }}
               isLoading={isLoading}
+              onRowClick={(org) =>
+                router.push(`/dashboard/crm/contacts/organizations/${org.id}`)
+              }
             />
           )}
         </CardContent>

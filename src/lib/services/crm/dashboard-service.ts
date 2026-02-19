@@ -80,7 +80,7 @@ export class DashboardService extends BaseService {
           gte: startOfMonth
         },
         status: {
-          in: [LeadStatus.NEW, LeadStatus.IN_PROGRESS]
+          in: [LeadStatus.OPEN]
         }
       }
     });

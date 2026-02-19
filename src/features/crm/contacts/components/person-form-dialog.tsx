@@ -32,6 +32,8 @@ import { useCreatePerson, useUpdatePerson } from '../hooks/use-persons';
 import { organizationsApi } from '@/lib/api/crm-client';
 import type { PersonWithRelations } from '@/lib/api/crm-types';
 
+const ORGANIZATION_NONE_VALUE = '__none__';
+
 const personFormSchema = z.object({
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
@@ -47,6 +49,7 @@ interface PersonFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   person?: PersonWithRelations;
+  defaultOrgId?: string;
 }
 
 /**
@@ -56,7 +59,8 @@ interface PersonFormDialogProps {
 export function PersonFormDialog({
   open,
   onOpenChange,
-  person
+  person,
+  defaultOrgId
 }: PersonFormDialogProps) {
   const [organizations, setOrganizations] = useState<any[]>([]);
   const [loadingOrgs, setLoadingOrgs] = useState(false);
@@ -72,7 +76,7 @@ export function PersonFormDialog({
       email: person?.email || '',
       phone: person?.phone || '',
       jobTitle: person?.jobTitle || '',
-      organizationId: person?.organization?.id || ''
+      organizationId: person?.organization?.id ?? defaultOrgId ?? undefined
     }
   });
 
@@ -86,11 +90,20 @@ export function PersonFormDialog({
           email: person.email || '',
           phone: person.phone || '',
           jobTitle: person.jobTitle || '',
-          organizationId: person.organization?.id || ''
+          organizationId: person.organization?.id ?? undefined
+        });
+      } else if (defaultOrgId) {
+        form.reset({
+          firstName: '',
+          lastName: '',
+          email: '',
+          phone: '',
+          jobTitle: '',
+          organizationId: defaultOrgId
         });
       }
     }
-  }, [open, person]);
+  }, [open, person, defaultOrgId]);
 
   const loadOrganizations = async () => {
     try {
@@ -106,10 +119,21 @@ export function PersonFormDialog({
 
   const onSubmit = async (values: PersonFormValues) => {
     try {
+      const normalizedValues = {
+        ...values,
+        organizationId:
+          values.organizationId && values.organizationId.length > 0
+            ? values.organizationId
+            : undefined
+      } satisfies PersonFormValues;
+
       if (person) {
-        await updatePerson.mutateAsync({ id: person.id, data: values });
+        await updatePerson.mutateAsync({
+          id: person.id,
+          data: normalizedValues
+        });
       } else {
-        await createPerson.mutateAsync(values);
+        await createPerson.mutateAsync(normalizedValues);
       }
       form.reset();
       onOpenChange(false);
@@ -220,9 +244,15 @@ export function PersonFormDialog({
               <FormItem>
                 <FormLabel>Organization</FormLabel>
                 <Select
-                  onValueChange={field.onChange}
-                  value={field.value}
-                  disabled={loadingOrgs}
+                    onValueChange={(value) => {
+                      if (value === ORGANIZATION_NONE_VALUE) {
+                        field.onChange(undefined);
+                        return;
+                      }
+                      field.onChange(value);
+                    }}
+                    value={field.value ?? undefined}
+                    disabled={loadingOrgs}
                 >
                   <FormControl>
                     <SelectTrigger>
@@ -230,7 +260,9 @@ export function PersonFormDialog({
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    <SelectItem value=''>None</SelectItem>
+                    <SelectItem value={ORGANIZATION_NONE_VALUE}>
+                      None
+                    </SelectItem>
                     {organizations.map((org) => (
                       <SelectItem key={org.id} value={org.id}>
                         {org.name}

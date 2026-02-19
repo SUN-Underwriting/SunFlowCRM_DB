@@ -24,6 +24,9 @@ export async function GET(request: NextRequest) {
       const source = searchParams.get('source') || undefined;
       const ownerId = searchParams.get('ownerId') || undefined;
       const search = searchParams.get('search') || undefined;
+      const wasSeenParam = searchParams.get('wasSeen');
+      const wasSeen =
+        wasSeenParam !== null ? wasSeenParam === 'true' : undefined;
       const { skip, take } = parsePagination(searchParams);
 
       const result = await service.list({
@@ -31,6 +34,7 @@ export async function GET(request: NextRequest) {
         source,
         ownerId,
         search,
+        wasSeen,
         skip,
         take
       });

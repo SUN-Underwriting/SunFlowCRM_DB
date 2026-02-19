@@ -203,7 +203,9 @@ export function StagesManager({
     queryKey: ['stages', selectedPipelineId],
     queryFn: async () => {
       const response = await stagesApi.listByPipeline(selectedPipelineId);
-      return Array.isArray(response.data) ? response.data : [];
+      const raw = response.data;
+      const stages = (raw as any)?.stages ?? raw;
+      return Array.isArray(stages) ? stages : [];
     },
     enabled: !!selectedPipelineId
   });

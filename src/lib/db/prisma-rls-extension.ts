@@ -14,11 +14,17 @@ const TENANT_MODELS = new Set([
   'Stage',
   'Deal',
   'Lead',
+  'LeadLabel',
+  'LeadPermittedUser',
+  'DealLabel',
+  'DealPermittedUser',
+  'Note',
   'Activity',
   'Email',
   'EmailAccount',
   'FieldDefinition'
   // Note: Tenant model itself is NOT included - tenant queries must be explicitly filtered
+  // LeadLabelLink and DealLabelLink have no tenantId — access is controlled via Lead/Deal FK
 ]);
 
 /**
@@ -42,7 +48,8 @@ async function validateRelationTenantAccess(
       pipeline: 'Pipeline',
       stage: 'Stage',
       person: 'Person',
-      organization: 'Organization'
+      organization: 'Organization',
+      creator: 'User'
     },
     Activity: {
       deal: 'Deal',
@@ -60,6 +67,9 @@ async function validateRelationTenantAccess(
     },
     Person: {
       organization: 'Organization'
+    },
+    Organization: {
+      owner: 'User'
     },
     Stage: {
       pipeline: 'Pipeline'

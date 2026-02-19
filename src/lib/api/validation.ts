@@ -90,8 +90,8 @@ export function validateEnumParam<T extends string>(
  * method forms (z.string().cuid(), z.string().email()) for better tree-shaking
  */
 export const CommonSchemas = {
-  // CUID validation - Zod v4 top-level API
-  id: z.cuid({ message: 'Invalid ID format' }),
+  // ID validation: accept both cuid and uuid formats
+  id: z.string().min(1, 'Invalid ID format'),
 
   // Query param validation helpers
   limitParam: z.coerce.number().int().min(1).max(1000).default(50),
@@ -109,51 +109,85 @@ export const CommonSchemas = {
   // Deal schemas
   createDeal: z.object({
     title: z.string().min(1, 'Title is required').max(200),
-    pipelineId: z.cuid(),
-    stageId: z.cuid(),
+    pipelineId: z.string().min(1),
+    stageId: z.string().min(1),
+    ownerId: z.string().min(1).optional(),
     value: z.number().min(0).optional(),
     currency: z.string().min(3).max(3).optional(),
     expectedCloseDate: z.coerce.date().optional(),
-    personId: z.cuid().optional(),
-    orgId: z.cuid().optional(),
+    personId: z.string().min(1).optional(),
+    orgId: z.string().min(1).optional(),
+    // V2 fields (PR-1)
+    source: z.string().max(100).optional(),
+    externalSourceId: z.string().max(255).optional(),
+    visibility: z.enum(['OWNER', 'TEAM', 'COMPANY']).optional(),
+    priority: z.enum(['LOW', 'NORMAL', 'HIGH']).optional(),
+    renewalType: z.string().max(50).optional(),
     customData: z.record(z.string(), z.unknown()).optional()
   }),
 
   updateDeal: z.object({
     title: z.string().min(1).max(200).optional(),
-    pipelineId: z.cuid().optional(),
-    stageId: z.cuid().optional(),
+    pipelineId: z.string().min(1).optional(),
+    stageId: z.string().min(1).optional(),
+    ownerId: z.string().min(1).optional(),
     value: z.number().min(0).optional(),
     currency: z.string().min(3).max(3).optional(),
     expectedCloseDate: z.coerce.date().optional(),
-    personId: z.cuid().optional(),
-    orgId: z.cuid().optional(),
+    personId: z.string().min(1).optional(),
+    orgId: z.string().min(1).optional(),
+    // V2 fields (PR-1)
+    source: z.string().max(100).optional(),
+    externalSourceId: z.string().max(255).optional(),
+    visibility: z.enum(['OWNER', 'TEAM', 'COMPANY']).optional(),
+    priority: z.enum(['LOW', 'NORMAL', 'HIGH']).optional(),
+    probability: z.number().int().min(0).max(100).optional(),
+    renewalType: z.string().max(50).optional(),
     customData: z.record(z.string(), z.unknown()).optional()
   }),
 
   moveDeal: z.object({
-    stageId: z.cuid()
+    stageId: z.string().min(1)
   }),
 
   // Lead schemas
   createLead: z.object({
     title: z.string().min(1, 'Title is required').max(200),
+    description: z.string().optional(),
     source: z.string().max(100).optional(),
-    personId: z.cuid().optional(),
-    orgId: z.cuid().optional()
+    origin: z.string().max(100).optional(),
+    inboxChannel: z.string().max(100).optional(),
+    externalSourceId: z.string().max(255).optional(),
+    valueAmount: z.number().min(0).optional(),
+    valueCurrency: z.string().length(3).optional(),
+    expectedCloseDate: z.coerce.date().optional(),
+    personId: z.string().min(1).optional(),
+    orgId: z.string().min(1).optional(),
+    labelIds: z.array(z.string().min(1)).optional(),
+    customData: z.record(z.string(), z.unknown()).optional()
   }),
 
   updateLead: z.object({
     title: z.string().min(1).max(200).optional(),
-    source: z.string().max(100).optional(),
-    status: z.enum(['NEW', 'IN_PROGRESS', 'CONVERTED', 'ARCHIVED']).optional(),
-    personId: z.cuid().optional(),
-    orgId: z.cuid().optional()
+    description: z.string().optional().nullable(),
+    source: z.string().max(100).optional().nullable(),
+    origin: z.string().max(100).optional().nullable(),
+    inboxChannel: z.string().max(100).optional().nullable(),
+    externalSourceId: z.string().max(255).optional().nullable(),
+    status: z.enum(['OPEN', 'LOST', 'CONVERTED', 'ARCHIVED']).optional(),
+    valueAmount: z.number().min(0).optional().nullable(),
+    valueCurrency: z.string().length(3).optional().nullable(),
+    expectedCloseDate: z.coerce.date().optional().nullable(),
+    personId: z.string().min(1).optional().nullable(),
+    orgId: z.string().min(1).optional().nullable(),
+    ownerId: z.string().min(1).optional(),
+    labelIds: z.array(z.string().min(1)).optional(),
+    customData: z.record(z.string(), z.unknown()).optional()
   }),
 
   convertLead: z.object({
-    pipelineId: z.cuid(),
-    stageId: z.cuid(),
+    pipelineId: z.string().min(1),
+    stageId: z.string().min(1),
     dealTitle: z.string().max(200).optional(),
     dealValue: z.number().min(0).optional(),
     currency: z.string().length(3).optional(),
@@ -176,6 +210,43 @@ export const CommonSchemas = {
       .optional()
   }),
 
+  // Note schemas
+  createNote: z.object({
+    body: z.string().min(1, 'Note body is required'),
+    pinned: z.boolean().optional(),
+    leadId: z.string().min(1).optional(),
+    dealId: z.string().min(1).optional(),
+    personId: z.string().min(1).optional(),
+    orgId: z.string().min(1).optional()
+  }),
+
+  updateNote: z.object({
+    body: z.string().min(1).optional(),
+    pinned: z.boolean().optional()
+  }),
+
+  // Lead label schemas
+  createLeadLabel: z.object({
+    name: z.string().min(1, 'Name is required').max(50),
+    color: z.string().max(7).optional()
+  }),
+
+  updateLeadLabel: z.object({
+    name: z.string().min(1).max(50).optional(),
+    color: z.string().max(7).optional()
+  }),
+
+  // Deal label schemas
+  createDealLabel: z.object({
+    name: z.string().min(1, 'Name is required').max(50),
+    color: z.string().max(7).optional()
+  }),
+
+  updateDealLabel: z.object({
+    name: z.string().min(1).max(50).optional(),
+    color: z.string().max(7).optional()
+  }),
+
   // Person schemas
   createPerson: z.object({
     firstName: z.string().min(1, 'First name is required').max(100),
@@ -183,7 +254,7 @@ export const CommonSchemas = {
     email: z.email().optional(),
     phone: z.string().max(50).optional(),
     jobTitle: z.string().max(100).optional(),
-    orgId: z.cuid().optional(),
+    orgId: z.string().min(1).optional(),
     customData: z.record(z.string(), z.unknown()).optional()
   }),
 
@@ -193,13 +264,17 @@ export const CommonSchemas = {
     email: z.email().optional(),
     phone: z.string().max(50).optional(),
     jobTitle: z.string().max(100).optional(),
-    orgId: z.cuid().optional(),
+    orgId: z.string().min(1).optional(),
     customData: z.record(z.string(), z.unknown()).optional()
   }),
 
   // Organization schemas
   createOrganization: z.object({
     name: z.string().min(1, 'Name is required').max(200),
+    domain: z.string().max(255).optional(),
+    ownerId: z.string().min(1).optional(),
+    countryCode: z.string().length(2).optional(), // ISO 3166-1 alpha-2
+    city: z.string().max(100).optional(),
     industry: z.string().max(100).optional(),
     size: z.string().max(50).optional(),
     website: z.url().optional().or(z.literal('')),
@@ -210,6 +285,10 @@ export const CommonSchemas = {
 
   updateOrganization: z.object({
     name: z.string().min(1).max(200).optional(),
+    domain: z.string().max(255).optional().nullable(),
+    ownerId: z.string().min(1).optional().nullable(),
+    countryCode: z.string().length(2).optional().nullable(),
+    city: z.string().max(100).optional().nullable(),
     industry: z.string().max(100).optional(),
     size: z.string().max(50).optional(),
     website: z.url().optional().or(z.literal('')),
@@ -231,7 +310,7 @@ export const CommonSchemas = {
 
   // Stage schemas
   createStage: z.object({
-    pipelineId: z.cuid(),
+    pipelineId: z.string().min(1),
     name: z.string().min(1, 'Name is required').max(100),
     probability: z.number().min(0).max(100),
     sortOrder: z.number().int().min(0).optional(),
@@ -249,25 +328,41 @@ export const CommonSchemas = {
 
   // Activity schemas
   createActivity: z.object({
-    type: z.enum(['CALL', 'MEETING', 'TASK', 'EMAIL']),
+    type: z.enum(['CALL', 'MEETING', 'TASK', 'EMAIL', 'DEADLINE', 'LUNCH']),
     subject: z.string().min(1, 'Subject is required').max(200),
     dueAt: z.coerce.date().optional(),
-    dealId: z.cuid().optional(),
-    personId: z.cuid().optional(),
-    orgId: z.cuid().optional(),
+    hasTime: z.boolean().optional(),
+    durationMin: z.number().int().min(1).max(1440).optional(),
+    busyFlag: z.enum(['FREE', 'BUSY']).optional(),
+    dealId: z.string().min(1).optional(),
+    leadId: z.string().min(1).optional(),
+    personId: z.string().min(1).optional(),
+    orgId: z.string().min(1).optional(),
     note: z.string().optional()
   }),
 
   updateActivity: z.object({
-    type: z.enum(['CALL', 'MEETING', 'TASK', 'EMAIL']).optional(),
+    type: z.enum(['CALL', 'MEETING', 'TASK', 'EMAIL', 'DEADLINE', 'LUNCH']).optional(),
     subject: z.string().min(1).max(200).optional(),
-    dueAt: z.coerce.date().optional(),
+    dueAt: z.coerce.date().nullable().optional(),
+    hasTime: z.boolean().optional(),
+    durationMin: z.number().int().min(1).max(1440).nullable().optional(),
+    busyFlag: z.enum(['FREE', 'BUSY']).optional(),
     done: z.boolean().optional(),
-    completedAt: z.coerce.date().optional(),
-    dealId: z.cuid().optional(),
-    personId: z.cuid().optional(),
-    orgId: z.cuid().optional(),
+    ownerId: z.string().min(1).optional(),
+    dealId: z.string().min(1).nullable().optional(),
+    leadId: z.string().min(1).nullable().optional(),
+    personId: z.string().min(1).nullable().optional(),
+    orgId: z.string().min(1).nullable().optional(),
     note: z.string().optional()
+  }),
+
+  bulkActivity: z.object({
+    ids: z.array(z.string().min(1)).min(1).max(200),
+    action: z.enum(['markDone', 'markUndone', 'changeOwner', 'changeType', 'shiftDueDate', 'delete']),
+    ownerId: z.string().min(1).optional(),
+    type: z.enum(['CALL', 'MEETING', 'TASK', 'EMAIL', 'DEADLINE', 'LUNCH']).optional(),
+    dueDateShiftDays: z.number().int().min(-365).max(365).optional()
   }),
 
   // Email schemas
@@ -275,18 +370,19 @@ export const CommonSchemas = {
     direction: z.enum(['INCOMING', 'OUTGOING']),
     subject: z.string().max(500),
     from: z.email(),
-    to: z.string(), // Email service expects comma-separated string
+    to: z.string(),
     cc: z.string().optional(),
     bcc: z.string().optional(),
     bodyPreview: z.string().optional(),
-    dealId: z.cuid().optional(),
-    personId: z.cuid().optional(),
-    orgId: z.cuid().optional()
+    dealId: z.string().min(1).optional(),
+    leadId: z.string().min(1).optional(),
+    personId: z.string().min(1).optional(),
+    orgId: z.string().min(1).optional()
   }),
 
   // Field Definition schemas
   createFieldDefinition: z.object({
-    entityType: z.enum(['DEAL', 'PERSON', 'ORGANIZATION']),
+    entityType: z.enum(['DEAL', 'LEAD', 'PERSON', 'ORGANIZATION']),
     key: z
       .string()
       .min(1)
@@ -305,7 +401,26 @@ export const CommonSchemas = {
       .optional(),
     options: z.array(z.string()).optional(),
     sortOrder: z.number().int().min(0).optional()
-  })
+  }),
+
+  // Notification schemas
+  listNotificationsQuery: z.object({
+    cursor: z.string().min(1).optional(),
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+    unreadOnly: z
+      .string()
+      .optional()
+      .transform((v) => v === 'true'),
+  }),
+
+  internalPushBody: z.object({
+    tenantId: z.string().min(1),
+    userIds: z.array(z.string().min(1)).min(1),
+    event: z.object({
+      type: z.string().min(1),
+      data: z.record(z.string(), z.unknown()),
+    }),
+  }),
 };
 
 /**

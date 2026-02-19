@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { useEffect, useRef, useState } from 'react';
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog';
@@ -35,340 +35,688 @@ import {
   PopoverContent,
   PopoverTrigger
 } from '@/components/ui/popover';
+import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-import { IconCalendar } from '@tabler/icons-react';
+import {
+  IconCalendar,
+  IconPhone,
+  IconMail,
+  IconNotes,
+  IconAlarm,
+  IconToolsKitchen2,
+  IconUsers,
+  IconLink,
+  IconBuilding,
+  IconBriefcase,
+  IconUser,
+  IconX,
+  IconLoader2
+} from '@tabler/icons-react';
 import { useCreateActivity, useUpdateActivity } from '../hooks/use-activities';
-import { dealsApi, personsApi, organizationsApi } from '@/lib/api/crm-client';
-import type { ActivityType } from '@prisma/client';
+import { dealsApi, personsApi, organizationsApi, leadsApi } from '@/lib/api/crm-client';
+import { BusyFlag } from '@prisma/client';
 import type { ActivityWithRelations } from '@/lib/api/crm-types';
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const NONE = '__none__';
+
+const ACTIVITY_TYPES = ['CALL', 'MEETING', 'TASK', 'EMAIL', 'DEADLINE', 'LUNCH'] as const;
+type ActivityTypeValue = typeof ACTIVITY_TYPES[number];
+
+interface TypeConfig {
+  label: string;
+  icon: typeof IconPhone;
+  color: string;
+  activeClass: string;
+}
+
+const TYPE_CONFIG: Record<ActivityTypeValue, TypeConfig> = {
+  CALL:     { label: 'Call',     icon: IconPhone,           color: 'text-blue-600',   activeClass: 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300' },
+  MEETING:  { label: 'Meeting',  icon: IconUsers,            color: 'text-green-600',  activeClass: 'border-green-500 bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300' },
+  TASK:     { label: 'Task',     icon: IconNotes,            color: 'text-orange-600', activeClass: 'border-orange-500 bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300' },
+  EMAIL:    { label: 'Email',    icon: IconMail,             color: 'text-purple-600', activeClass: 'border-purple-500 bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300' },
+  DEADLINE: { label: 'Deadline', icon: IconAlarm,            color: 'text-red-600',    activeClass: 'border-red-500 bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300' },
+  LUNCH:    { label: 'Lunch',    icon: IconToolsKitchen2,    color: 'text-yellow-600', activeClass: 'border-yellow-500 bg-yellow-50 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300' }
+};
+
+const DURATION_PRESETS = [
+  { label: '15m', value: 15 },
+  { label: '30m', value: 30 },
+  { label: '1h',  value: 60 },
+  { label: '2h',  value: 120 }
+];
+
+// ─── Schema ───────────────────────────────────────────────────────────────────
+
 const activityFormSchema = z.object({
-  type: z.enum(['CALL', 'EMAIL', 'MEETING', 'TASK']),
-  subject: z.string().min(1, 'Subject is required'),
-  dueAt: z.date().optional(),
-  dealId: z.string().optional(),
-  personId: z.string().optional(),
-  organizationId: z.string().optional(),
-  note: z.string().optional()
+  type:        z.enum(ACTIVITY_TYPES),
+  subject:     z.string().min(1, 'Subject is required').max(200),
+  dueAt:       z.date().optional(),
+  hasTime:     z.boolean(),
+  dueTime:     z.string().optional(),
+  durationMin: z.coerce.number().int().min(1).max(1440).optional(),
+  busyFlag:    z.enum(['FREE', 'BUSY']),
+  dealId:      z.string().optional(),
+  leadId:      z.string().optional(),
+  personId:    z.string().optional(),
+  orgId:       z.string().optional(),
+  note:        z.string().optional()
 });
 
 type ActivityFormValues = z.infer<typeof activityFormSchema>;
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 interface ActivityFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   activity?: ActivityWithRelations;
+  defaultDealId?: string;
+  defaultLeadId?: string;
+  defaultPersonId?: string;
+  defaultOrgId?: string;
 }
 
-/**
- * Activity Form Dialog
- * Best Practice (Context7): Reusable form for create/edit operations
- */
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export function ActivityFormDialog({
   open,
   onOpenChange,
-  activity
+  activity,
+  defaultDealId,
+  defaultLeadId,
+  defaultPersonId,
+  defaultOrgId
 }: ActivityFormDialogProps) {
-  const [deals, setDeals] = useState<any[]>([]);
-  const [persons, setPersons] = useState<any[]>([]);
-  const [organizations, setOrganizations] = useState<any[]>([]);
+  const [deals, setDeals]             = useState<{ id: string; title: string }[]>([]);
+  const [leads, setLeads]             = useState<{ id: string; title: string }[]>([]);
+  const [persons, setPersons]         = useState<{ id: string; firstName: string; lastName: string }[]>([]);
+  const [organizations, setOrgs]      = useState<{ id: string; name: string }[]>([]);
   const [loadingRelated, setLoadingRelated] = useState(false);
+
+  const subjectRef = useRef<HTMLInputElement>(null);
 
   const createActivity = useCreateActivity();
   const updateActivity = useUpdateActivity();
 
-  const form = useForm<ActivityFormValues>({
-    resolver: zodResolver(activityFormSchema),
-    defaultValues: {
-      type: activity?.type || 'TASK',
-      subject: activity?.subject || '',
-      dueAt: activity?.dueAt ? new Date(activity.dueAt) : undefined,
-      dealId: activity?.deal?.id || undefined,
-      personId: activity?.person?.id || undefined,
-      organizationId: activity?.organization?.id || undefined,
-      note: activity?.note || ''
-    }
+  const form = useForm<ActivityFormValues, unknown, ActivityFormValues>({
+    resolver: standardSchemaResolver(activityFormSchema) as any,
+    defaultValues: buildDefaultValues(activity, { defaultDealId, defaultLeadId, defaultPersonId, defaultOrgId }),
+    mode: 'onChange'
   });
 
+  const hasTime = form.watch('hasTime');
+  const type    = form.watch('type');
+  const dueAt   = form.watch('dueAt');
+  const note    = form.watch('note') ?? '';
+
+  // Reset + load on open
   useEffect(() => {
-    if (open) {
-      loadRelatedData();
-      if (activity) {
-        form.reset({
-          type: activity.type,
-          subject: activity.subject,
-          dueAt: activity.dueAt ? new Date(activity.dueAt) : undefined,
-          dealId: activity.deal?.id || undefined,
-          personId: activity.person?.id || undefined,
-          organizationId: activity.organization?.id || undefined,
-          note: activity.note || ''
-        });
-      }
+    if (!open) return;
+    form.reset(buildDefaultValues(activity, { defaultDealId, defaultLeadId, defaultPersonId, defaultOrgId }));
+    loadRelatedData();
+    setTimeout(() => subjectRef.current?.focus(), 50);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, activity?.id]);
+
+  // Clear time fields when "All day" selected
+  useEffect(() => {
+    if (!open) return;
+    if (!hasTime) {
+      form.setValue('dueTime', undefined, { shouldDirty: false });
+      form.setValue('durationMin', undefined, { shouldDirty: false });
     }
-  }, [open, activity]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasTime, open]);
+
+  // Smart defaults by type (create mode only)
+  useEffect(() => {
+    if (!open || activity) return;
+    const dirty = form.formState.dirtyFields as Partial<Record<keyof ActivityFormValues, boolean>>;
+    const timed = type === 'CALL' || type === 'MEETING' || type === 'LUNCH';
+    if (!dirty.hasTime)    form.setValue('hasTime',    timed,            { shouldDirty: false });
+    if (!dirty.busyFlag)   form.setValue('busyFlag',   timed ? 'BUSY' : 'FREE', { shouldDirty: false });
+    if (timed && !dirty.durationMin && !form.getValues('durationMin'))
+      form.setValue('durationMin', 30, { shouldDirty: false });
+    if (!timed && !dirty.durationMin)
+      form.setValue('durationMin', undefined, { shouldDirty: false });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type, open]);
+
+  // Cmd+Enter submit
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (open && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        form.handleSubmit(onSubmit)();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const loadRelatedData = async () => {
+    setLoadingRelated(true);
     try {
-      setLoadingRelated(true);
-      const [dealsRes, personsRes, orgsRes] = await Promise.all([
+      const [dr, lr, pr, or_] = await Promise.all([
         dealsApi.list({ take: 50 }),
+        leadsApi.list({ take: 50 }),
         personsApi.list({ take: 50 }),
         organizationsApi.list({ take: 50 })
       ]);
-      setDeals(dealsRes.data.deals || []);
-      setPersons(personsRes.data.persons || []);
-      setOrganizations(orgsRes.data.organizations || []);
-    } catch (error) {
-      console.error('Failed to load related data:', error);
-    } finally {
+      setDeals(dr.data.deals ?? []);
+      setLeads(lr.data.leads ?? []);
+      setPersons(pr.data.persons ?? []);
+      setOrgs(or_.data.organizations ?? []);
+    } catch { /* non-blocking */ } finally {
       setLoadingRelated(false);
     }
   };
 
   const onSubmit = async (values: ActivityFormValues) => {
-    try {
-      if (activity) {
-        await updateActivity.mutateAsync({ id: activity.id, data: values });
-      } else {
-        await createActivity.mutateAsync(values);
-      }
-      form.reset();
-      onOpenChange(false);
-    } catch (error) {
-      // Error handled by mutation hooks
+    let dueAt = values.dueAt;
+    if (dueAt && values.hasTime && values.dueTime) {
+      const [h, m] = values.dueTime.split(':').map(Number);
+      dueAt = new Date(dueAt);
+      dueAt.setHours(h, m, 0, 0);
     }
+    const payload = {
+      type:        values.type,
+      subject:     values.subject,
+      dueAt,
+      hasTime:     values.hasTime,
+      durationMin: values.durationMin || undefined,
+      busyFlag:    values.busyFlag === 'BUSY' ? BusyFlag.BUSY : BusyFlag.FREE,
+      dealId:      values.dealId || undefined,
+      leadId:      values.leadId || undefined,
+      personId:    values.personId || undefined,
+      orgId:       values.orgId || undefined,
+      note:        values.note || undefined
+    };
+    try {
+      if (activity) await updateActivity.mutateAsync({ id: activity.id, data: payload });
+      else          await createActivity.mutateAsync(payload);
+      onOpenChange(false);
+    } catch { /* handled by mutation hooks */ }
   };
+
+  const isPending  = createActivity.isPending || updateActivity.isPending;
+  const canSubmit  = form.formState.isValid && !isPending;
+  const typeConfig = TYPE_CONFIG[type];
+  const TypeIcon   = typeConfig.icon;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='sm:max-w-[600px]'>
-        <DialogHeader>
-          <DialogTitle>
-            {activity ? 'Edit Activity' : 'Create New Activity'}
+      <DialogContent className='flex flex-col gap-0 p-0 sm:max-w-[580px] max-h-[92vh] overflow-hidden'>
+
+        {/* ── Header ── */}
+        <DialogHeader className='flex-row items-center gap-3 border-b px-6 py-4'>
+          <div className={cn(
+            'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2',
+            typeConfig.activeClass
+          )}>
+            <TypeIcon className='h-4 w-4' />
+          </div>
+          <DialogTitle className='text-base font-semibold'>
+            {activity ? 'Edit Activity' : 'Schedule Activity'}
           </DialogTitle>
-          <DialogDescription>
-            {activity
-              ? 'Update the activity details below.'
-              : 'Schedule a new activity for your CRM.'}
-          </DialogDescription>
         </DialogHeader>
 
-        <Form
-          form={form}
-          onSubmit={form.handleSubmit(onSubmit)}
-          className='space-y-4'
-        >
-          <div className='grid grid-cols-2 gap-4'>
-            <FormField
-              control={form.control}
-              name='type'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Type *</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder='Select type' />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value='CALL'>Call</SelectItem>
-                      <SelectItem value='EMAIL'>Email</SelectItem>
-                      <SelectItem value='MEETING'>Meeting</SelectItem>
-                      <SelectItem value='TASK'>Task</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+        {/* ── Scrollable body ── */}
+        <div className='flex-1 overflow-y-auto'>
+          <Form form={form} onSubmit={form.handleSubmit(onSubmit)}>
+            <div className='space-y-0 divide-y divide-border'>
 
-            <FormField
-              control={form.control}
-              name='dueAt'
-              render={({ field }) => (
-                <FormItem className='flex flex-col'>
-                  <FormLabel>Due Date</FormLabel>
-                  <Popover>
-                    <PopoverTrigger asChild>
+              {/* ─ Type picker + Subject ─ */}
+              <div className='px-6 py-5 space-y-4'>
+                {/* Type picker */}
+                <FormField
+                  control={form.control}
+                  name='type'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className='text-xs font-medium text-muted-foreground uppercase tracking-wider'>
+                        Activity type
+                      </FormLabel>
+                      <div className='grid grid-cols-6 gap-1.5 mt-1.5'>
+                        {ACTIVITY_TYPES.map((t) => {
+                          const cfg  = TYPE_CONFIG[t];
+                          const Icon = cfg.icon;
+                          const active = field.value === t;
+                          return (
+                            <button
+                              key={t}
+                              type='button'
+                              onClick={() => field.onChange(t)}
+                              className={cn(
+                                'flex flex-col items-center gap-1 rounded-lg border-2 px-2 py-2 text-center transition-all',
+                                'hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                                active ? cfg.activeClass : 'border-transparent text-muted-foreground bg-muted/30'
+                              )}
+                            >
+                              <Icon className={cn('h-4 w-4', active ? '' : 'opacity-60')} />
+                              <span className='text-[10px] font-medium leading-none'>{cfg.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </FormItem>
+                  )}
+                />
+
+                {/* Subject */}
+                <FormField
+                  control={form.control}
+                  name='subject'
+                  render={({ field }) => (
+                    <FormItem>
                       <FormControl>
-                        <Button
-                          variant='outline'
+                        <input
+                          ref={subjectRef}
+                          placeholder='Subject…'
                           className={cn(
-                            'w-full pl-3 text-left font-normal',
-                            !field.value && 'text-muted-foreground'
+                            'w-full bg-transparent text-lg font-medium placeholder:text-muted-foreground/50',
+                            'border-0 outline-none ring-0 focus:ring-0 focus:outline-none',
+                            'py-1 leading-snug'
                           )}
-                        >
-                          {field.value ? (
-                            format(field.value, 'PPP')
-                          ) : (
-                            <span>Pick a date</span>
-                          )}
-                          <IconCalendar className='ml-auto h-4 w-4 opacity-50' />
-                        </Button>
+                          {...field}
+                        />
                       </FormControl>
-                    </PopoverTrigger>
-                    <PopoverContent className='w-auto p-0' align='start'>
-                      <Calendar
-                        mode='single'
-                        selected={field.value}
-                        onSelect={field.onChange}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
+                      <FormMessage className='text-xs' />
+                    </FormItem>
+                  )}
+                />
+              </div>
 
-          <FormField
-            control={form.control}
-            name='subject'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Subject *</FormLabel>
-                <FormControl>
-                  <Input
-                    placeholder='e.g., Follow-up call with client'
-                    {...field}
+              {/* ─ When ─ */}
+              <div className='px-6 py-5 space-y-3'>
+                <p className='text-xs font-medium text-muted-foreground uppercase tracking-wider'>When</p>
+
+                {/* Date + All day / Set time */}
+                <div className='flex items-center gap-3'>
+                  <FormField
+                    control={form.control}
+                    name='dueAt'
+                    render={({ field }) => (
+                      <FormItem className='flex-1'>
+                        <div className='relative'>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <FormControl>
+                                <Button
+                                  variant='outline'
+                                  className={cn(
+                                    'w-full justify-start text-left font-normal h-9',
+                                    field.value ? 'pr-8' : '',
+                                    !field.value && 'text-muted-foreground'
+                                  )}
+                                >
+                                  <IconCalendar className='mr-2 h-4 w-4 shrink-0' />
+                                  {field.value ? format(field.value, 'EEE, MMM d, yyyy') : 'Pick a date'}
+                                </Button>
+                              </FormControl>
+                            </PopoverTrigger>
+                            <PopoverContent className='w-auto p-0' align='start'>
+                              <Calendar mode='single' selected={field.value} onSelect={field.onChange} initialFocus />
+                            </PopoverContent>
+                          </Popover>
+                          {field.value && (
+                            <button
+                              type='button'
+                              onClick={(e) => { e.stopPropagation(); field.onChange(undefined); }}
+                              className='absolute right-2 top-1/2 -translate-y-1/2 rounded hover:bg-muted p-0.5 text-muted-foreground hover:text-foreground'
+                              aria-label='Clear date'
+                            >
+                              <IconX className='h-3 w-3' />
+                            </button>
+                          )}
+                        </div>
+                        <FormMessage className='text-xs' />
+                      </FormItem>
+                    )}
                   />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
 
-          <FormField
-            control={form.control}
-            name='dealId'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Related Deal</FormLabel>
-                <Select
-                  onValueChange={field.onChange}
-                  value={field.value}
-                  disabled={loadingRelated}
-                >
-                  <FormControl>
-                    <SelectTrigger>
-                      <SelectValue placeholder='Select deal' />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    {deals.map((deal) => (
-                      <SelectItem key={deal.id} value={deal.id}>
-                        {deal.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <div className='grid grid-cols-2 gap-4'>
-            <FormField
-              control={form.control}
-              name='personId'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Related Person</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    value={field.value}
-                    disabled={loadingRelated}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder='Select person' />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {persons.map((person) => (
-                        <SelectItem key={person.id} value={person.id}>
-                          {person.firstName} {person.lastName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name='organizationId'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Related Organization</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    value={field.value}
-                    disabled={loadingRelated}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder='Select organization' />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {organizations.map((org) => (
-                        <SelectItem key={org.id} value={org.id}>
-                          {org.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
-
-          <FormField
-            control={form.control}
-            name='note'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Notes</FormLabel>
-                <FormControl>
-                  <Textarea
-                    placeholder='Add any additional notes...'
-                    rows={4}
-                    {...field}
+                  {/* All day / Set time toggle */}
+                  <FormField
+                    control={form.control}
+                    name='hasTime'
+                    render={({ field }) => (
+                      <FormItem className='shrink-0'>
+                        <div className='inline-flex h-9 items-center rounded-md border bg-muted p-0.5 text-muted-foreground'>
+                          <button
+                            type='button'
+                            onClick={() => field.onChange(false)}
+                            className={cn(
+                              'inline-flex items-center rounded px-2.5 py-1.5 text-xs font-medium transition-all',
+                              !field.value ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'
+                            )}
+                          >
+                            All day
+                          </button>
+                          <button
+                            type='button'
+                            onClick={() => field.onChange(true)}
+                            className={cn(
+                              'inline-flex items-center rounded px-2.5 py-1.5 text-xs font-medium transition-all',
+                              field.value ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'
+                            )}
+                          >
+                            Set time
+                          </button>
+                        </div>
+                      </FormItem>
+                    )}
                   />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+                </div>
 
-          <div className='flex justify-end gap-3 pt-4'>
+                {/* Time row — only when hasTime */}
+                {hasTime && (
+                  <div className='flex items-end gap-3'>
+                    {/* Time input */}
+                    <FormField
+                      control={form.control}
+                      name='dueTime'
+                      render={({ field }) => (
+                        <FormItem className='w-32'>
+                          <FormLabel className='text-xs text-muted-foreground'>Start time</FormLabel>
+                          <FormControl>
+                            <Input type='time' className='h-9' {...field} value={field.value ?? ''} />
+                          </FormControl>
+                          <FormMessage className='text-xs' />
+                        </FormItem>
+                      )}
+                    />
+
+                    {/* Duration presets */}
+                    <FormField
+                      control={form.control}
+                      name='durationMin'
+                      render={({ field }) => (
+                        <FormItem className='flex-1'>
+                          <FormLabel className='text-xs text-muted-foreground'>Duration</FormLabel>
+                          <div className='flex items-center gap-1.5'>
+                            {DURATION_PRESETS.map((p) => (
+                              <button
+                                key={p.value}
+                                type='button'
+                                onClick={() => field.onChange(field.value === p.value ? undefined : p.value)}
+                                className={cn(
+                                  'h-9 rounded-md border px-3 text-sm font-medium transition-colors',
+                                  field.value === p.value
+                                    ? 'border-primary bg-primary text-primary-foreground'
+                                    : 'border-input bg-background hover:bg-muted'
+                                )}
+                              >
+                                {p.label}
+                              </button>
+                            ))}
+                            <Input
+                              type='number'
+                              min={1}
+                              max={1440}
+                              placeholder='min'
+                              className='h-9 w-16 text-sm'
+                              value={
+                                field.value && !DURATION_PRESETS.some(p => p.value === field.value)
+                                  ? field.value
+                                  : ''
+                              }
+                              onChange={(e) => field.onChange(e.target.value ? Number(e.target.value) : undefined)}
+                            />
+                          </div>
+                          <FormMessage className='text-xs' />
+                        </FormItem>
+                      )}
+                    />
+
+                    {/* Busy / Free */}
+                    <FormField
+                      control={form.control}
+                      name='busyFlag'
+                      render={({ field }) => (
+                        <FormItem className='w-28 shrink-0'>
+                          <FormLabel className='text-xs text-muted-foreground'>Calendar</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger className='h-9 text-sm'>
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value='FREE'>🟢 Free</SelectItem>
+                              <SelectItem value='BUSY'>🔴 Busy</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* ─ Link to ─ */}
+              <div className='px-6 py-5 space-y-3'>
+                <p className='text-xs font-medium text-muted-foreground uppercase tracking-wider'>Link to</p>
+                <div className='grid grid-cols-2 gap-3'>
+                  <LinkedEntitySelect
+                    control={form.control}
+                    name='dealId'
+                    label='Deal'
+                    icon={IconBriefcase}
+                    options={deals.map(d => ({ value: d.id, label: d.title }))}
+                    loading={loadingRelated}
+                  />
+                  <LinkedEntitySelect
+                    control={form.control}
+                    name='leadId'
+                    label='Lead'
+                    icon={IconLink}
+                    options={leads.map(l => ({ value: l.id, label: l.title }))}
+                    loading={loadingRelated}
+                  />
+                  <LinkedEntitySelect
+                    control={form.control}
+                    name='personId'
+                    label='Person'
+                    icon={IconUser}
+                    options={persons.map(p => ({ value: p.id, label: `${p.firstName} ${p.lastName}`.trim() }))}
+                    loading={loadingRelated}
+                  />
+                  <LinkedEntitySelect
+                    control={form.control}
+                    name='orgId'
+                    label='Organization'
+                    icon={IconBuilding}
+                    options={organizations.map(o => ({ value: o.id, label: o.name }))}
+                    loading={loadingRelated}
+                  />
+                </div>
+              </div>
+
+              {/* ─ Note ─ */}
+              <div className='px-6 py-5 space-y-2'>
+                <div className='flex items-center justify-between'>
+                  <p className='text-xs font-medium text-muted-foreground uppercase tracking-wider'>
+                    Note <span className='normal-case'>(private)</span>
+                  </p>
+                  {note.length > 0 && (
+                    <span className='text-[11px] text-muted-foreground tabular-nums'>
+                      {note.length}/500
+                    </span>
+                  )}
+                </div>
+                <FormField
+                  control={form.control}
+                  name='note'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormControl>
+                        <Textarea
+                          placeholder='Add a private note visible only to your team…'
+                          rows={3}
+                          maxLength={500}
+                          className='resize-none text-sm'
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage className='text-xs' />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+            </div>
+          </Form>
+        </div>
+
+        {/* ── Footer ── */}
+        <DialogFooter className='flex-row items-center justify-between border-t px-6 py-4 gap-3'>
+          <span className='hidden text-[11px] text-muted-foreground sm:block'>
+            <kbd className='rounded border bg-muted px-1 py-0.5 font-mono text-[10px]'>⌘ Enter</kbd>
+            {' '}to {activity ? 'update' : 'schedule'}
+          </span>
+          <div className='flex items-center gap-2 ml-auto'>
             <Button
               type='button'
-              variant='outline'
+              variant='ghost'
+              size='sm'
               onClick={() => onOpenChange(false)}
+              disabled={isPending}
             >
               Cancel
             </Button>
             <Button
-              type='submit'
-              disabled={createActivity.isPending || updateActivity.isPending}
+              size='sm'
+              disabled={!canSubmit}
+              onClick={form.handleSubmit(onSubmit)}
+              className='min-w-[100px]'
             >
-              {createActivity.isPending || updateActivity.isPending
-                ? 'Saving...'
-                : activity
-                  ? 'Update Activity'
-                  : 'Create Activity'}
+              {isPending
+                ? <><IconLoader2 className='mr-2 h-3.5 w-3.5 animate-spin' /> Saving…</>
+                : activity ? 'Update' : 'Schedule'
+              }
             </Button>
           </div>
-        </Form>
+        </DialogFooter>
+
       </DialogContent>
     </Dialog>
   );
+}
+
+// ─── LinkedEntitySelect ───────────────────────────────────────────────────────
+
+function LinkedEntitySelect({
+  control,
+  name,
+  label,
+  icon: Icon,
+  options,
+  loading
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  control: any;
+  name: 'dealId' | 'leadId' | 'personId' | 'orgId';
+  label: string;
+  icon: typeof IconBriefcase;
+  options: { value: string; label: string }[];
+  loading: boolean;
+}) {
+  return (
+    <FormField
+      control={control}
+      name={name}
+      render={({ field }: { field: any }) => {
+        const selected = options.find(o => o.value === field.value);
+        return (
+          <FormItem>
+            <div className='flex h-9 items-center rounded-md border bg-background pr-2 transition-colors hover:border-ring focus-within:border-ring focus-within:ring-1 focus-within:ring-ring'>
+              <div className='flex h-9 w-9 shrink-0 items-center justify-center text-muted-foreground'>
+                <Icon className='h-3.5 w-3.5' />
+              </div>
+              <Select
+                onValueChange={(val) => field.onChange(val === '__none__' ? undefined : val)}
+                value={field.value ?? '__none__'}
+                disabled={loading}
+              >
+                <FormControl>
+                  <SelectTrigger className='h-auto border-0 p-0 shadow-none focus:ring-0 text-sm font-normal flex-1'>
+                    <SelectValue placeholder={loading ? 'Loading…' : label}>
+                      {selected ? (
+                        <span className='truncate'>{selected.label}</span>
+                      ) : (
+                        <span className='text-muted-foreground'>{loading ? 'Loading…' : label}</span>
+                      )}
+                    </SelectValue>
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value='__none__'>
+                    <span className='text-muted-foreground'>None</span>
+                  </SelectItem>
+                  {options.map(o => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {field.value && (
+                <button
+                  type='button'
+                  onClick={() => field.onChange(undefined)}
+                  className='ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                  aria-label={`Clear ${label}`}
+                >
+                  <IconX className='h-3 w-3' />
+                </button>
+              )}
+            </div>
+          </FormItem>
+        );
+      }}
+    />
+  );
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function buildDefaultValues(
+  activity: ActivityWithRelations | undefined,
+  defaults: {
+    defaultDealId?: string;
+    defaultLeadId?: string;
+    defaultPersonId?: string;
+    defaultOrgId?: string;
+  }
+): ActivityFormValues {
+  if (activity) {
+    const dueAt   = activity.dueAt ? new Date(activity.dueAt) : undefined;
+    const dueTime = dueAt && activity.hasTime ? format(dueAt, 'HH:mm') : undefined;
+    return {
+      type:        activity.type as ActivityTypeValue,
+      subject:     activity.subject,
+      dueAt,
+      hasTime:     activity.hasTime ?? false,
+      dueTime,
+      durationMin: activity.durationMin ?? undefined,
+      busyFlag:    (activity.busyFlag ?? 'FREE') as 'FREE' | 'BUSY',
+      dealId:      activity.deal?.id ?? undefined,
+      leadId:      (activity as ActivityWithRelations & { lead?: { id: string } | null }).lead?.id ?? undefined,
+      personId:    activity.person?.id ?? undefined,
+      orgId:       activity.organization?.id ?? undefined,
+      note:        activity.note ?? undefined
+    };
+  }
+  return {
+    type:     'TASK',
+    subject:  '',
+    hasTime:  false,
+    busyFlag: 'FREE',
+    dealId:   defaults.defaultDealId ?? undefined,
+    leadId:   defaults.defaultLeadId ?? undefined,
+    personId: defaults.defaultPersonId ?? undefined,
+    orgId:    defaults.defaultOrgId ?? undefined
+  };
 }

@@ -13,7 +13,9 @@ import {
   IconPhone,
   IconMail,
   IconCalendar,
-  IconNotes
+  IconNotes,
+  IconAlarm,
+  IconToolsKitchen2
 } from '@tabler/icons-react';
 import { formatDistanceToNow } from 'date-fns';
 import type { ActivityType } from '@prisma/client';
@@ -38,14 +40,18 @@ const activityIcons: Record<ActivityType, any> = {
   CALL: IconPhone,
   EMAIL: IconMail,
   MEETING: IconCalendar,
-  TASK: IconNotes
+  TASK: IconNotes,
+  DEADLINE: IconAlarm,
+  LUNCH: IconToolsKitchen2
 };
 
 const activityColors: Record<ActivityType, string> = {
   CALL: 'bg-blue-500/10 text-blue-700 border-blue-200',
   EMAIL: 'bg-purple-500/10 text-purple-700 border-purple-200',
   MEETING: 'bg-green-500/10 text-green-700 border-green-200',
-  TASK: 'bg-orange-500/10 text-orange-700 border-orange-200'
+  TASK: 'bg-orange-500/10 text-orange-700 border-orange-200',
+  DEADLINE: 'bg-red-500/10 text-red-700 border-red-200',
+  LUNCH: 'bg-yellow-500/10 text-yellow-700 border-yellow-200'
 };
 
 /**

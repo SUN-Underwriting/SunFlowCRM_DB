@@ -3,37 +3,35 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { activitiesApi } from '@/lib/api/crm-client';
 import { toast } from 'sonner';
-import type { ActivityType } from '@prisma/client';
+import type { ActivityType, BusyFlag } from '@prisma/client';
 import type { ActivityWithRelations } from '@/lib/api/crm-types';
 
-/**
- * Activities Query Keys
- * Best Practice (Context7): Centralized query keys for cache management
- */
 export const activitiesKeys = {
   all: ['activities'] as const,
   lists: () => [...activitiesKeys.all, 'list'] as const,
-  list: (filters: ActivitiesFilters) =>
-    [...activitiesKeys.lists(), filters] as const,
+  list: (filters: ActivitiesFilters) => [...activitiesKeys.lists(), filters] as const,
   details: () => [...activitiesKeys.all, 'detail'] as const,
   detail: (id: string) => [...activitiesKeys.details(), id] as const
 };
 
 export interface ActivitiesFilters {
+  status?: 'todo' | 'done' | 'all';
   type?: ActivityType;
-  ownerId?: string;
+  owner?: string;
   dealId?: string;
+  leadId?: string;
   personId?: string;
-  done?: boolean;
-  dueDateFrom?: Date;
-  dueDateTo?: Date;
+  orgId?: string;
+  due?: 'overdue' | 'today' | 'week' | 'range';
+  from?: string;
+  to?: string;
+  q?: string;
+  sortBy?: string;
+  sortDesc?: boolean;
   skip?: number;
   take?: number;
 }
 
-/**
- * Hook to fetch activities list with server-side filtering
- */
 export function useActivities(filters: ActivitiesFilters = {}) {
   return useQuery({
     queryKey: activitiesKeys.list(filters),
@@ -41,13 +39,10 @@ export function useActivities(filters: ActivitiesFilters = {}) {
       const response = await activitiesApi.list(filters);
       return response.data;
     },
-    staleTime: 30 * 1000 // 30 seconds
+    staleTime: 30 * 1000
   });
 }
 
-/**
- * Hook to fetch single activity by ID
- */
 export function useActivity(id: string) {
   return useQuery({
     queryKey: activitiesKeys.detail(id),
@@ -59,9 +54,6 @@ export function useActivity(id: string) {
   });
 }
 
-/**
- * Hook to create a new activity
- */
 export function useCreateActivity() {
   const queryClient = useQueryClient();
 
@@ -70,26 +62,24 @@ export function useCreateActivity() {
       type: ActivityType;
       subject: string;
       dueAt?: Date;
+      hasTime?: boolean;
+      durationMin?: number;
+      busyFlag?: BusyFlag;
       dealId?: string;
+      leadId?: string;
       personId?: string;
-      organizationId?: string;
+      orgId?: string;
       note?: string;
     }) => {
-      // Context7: Map frontend field names to API schema
       const response = await activitiesApi.create({
-        type: data.type,
-        subject: data.subject,
-        dueAt: data.dueAt,
-        dealId: data.dealId,
-        personId: data.personId,
-        orgId: data.organizationId, // Map organizationId → orgId
-        note: data.note
+        ...data,
+        dueAt: data.dueAt?.toISOString()
       });
       return response.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: activitiesKeys.lists() });
-      toast.success('Activity created successfully');
+      toast.success('Activity created');
     },
     onError: (error: Error) => {
       toast.error(error.message || 'Failed to create activity');
@@ -97,9 +87,6 @@ export function useCreateActivity() {
   });
 }
 
-/**
- * Hook to update an existing activity
- */
 export function useUpdateActivity() {
   const queryClient = useQueryClient();
 
@@ -110,45 +97,46 @@ export function useUpdateActivity() {
     }: {
       id: string;
       data: {
+        type?: ActivityType;
         subject?: string;
-        dueAt?: Date;
+        dueAt?: Date | null;
+        hasTime?: boolean;
+        durationMin?: number | null;
+        busyFlag?: BusyFlag;
         done?: boolean;
+        ownerId?: string;
+        dealId?: string | null;
+        leadId?: string | null;
+        personId?: string | null;
+        orgId?: string | null;
         note?: string;
       };
     }) => {
-      const response = await activitiesApi.update(id, data);
+      const response = await activitiesApi.update(id, {
+        ...data,
+        dueAt: data.dueAt === null ? null : data.dueAt?.toISOString()
+      });
       return response.data;
     },
     onMutate: async ({ id }) => {
       await queryClient.cancelQueries({ queryKey: activitiesKeys.detail(id) });
-      const previousActivity = queryClient.getQueryData(
-        activitiesKeys.detail(id)
-      );
-      return { previousActivity };
+      const previous = queryClient.getQueryData(activitiesKeys.detail(id));
+      return { previous };
     },
     onError: (error: Error, variables, context) => {
-      if (context?.previousActivity) {
-        queryClient.setQueryData(
-          activitiesKeys.detail(variables.id),
-          context.previousActivity
-        );
+      if (context?.previous) {
+        queryClient.setQueryData(activitiesKeys.detail(variables.id), context.previous);
       }
       toast.error(error.message || 'Failed to update activity');
     },
-    onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: activitiesKeys.detail(variables.id)
-      });
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: activitiesKeys.detail(variables.id) });
       queryClient.invalidateQueries({ queryKey: activitiesKeys.lists() });
-      toast.success('Activity updated successfully');
+      toast.success('Activity updated');
     }
   });
 }
 
-/**
- * Hook to mark activity as done/undone
- * Best Practice: Dedicated mutation for common action
- */
 export function useToggleActivityDone() {
   const queryClient = useQueryClient();
 
@@ -159,25 +147,17 @@ export function useToggleActivityDone() {
     },
     onMutate: async ({ id, done }) => {
       await queryClient.cancelQueries({ queryKey: activitiesKeys.detail(id) });
-      const previousActivity = queryClient.getQueryData(
-        activitiesKeys.detail(id)
-      );
-
-      // Optimistic update
+      const previous = queryClient.getQueryData(activitiesKeys.detail(id));
       queryClient.setQueryData(
         activitiesKeys.detail(id),
         (old: ActivityWithRelations | undefined) =>
           old ? { ...old, done, completedAt: done ? new Date() : null } : old
       );
-
-      return { previousActivity };
+      return { previous };
     },
     onError: (error: Error, variables, context) => {
-      if (context?.previousActivity) {
-        queryClient.setQueryData(
-          activitiesKeys.detail(variables.id),
-          context.previousActivity
-        );
+      if (context?.previous) {
+        queryClient.setQueryData(activitiesKeys.detail(variables.id), context.previous);
       }
       toast.error('Failed to update activity');
     },
@@ -187,9 +167,6 @@ export function useToggleActivityDone() {
   });
 }
 
-/**
- * Hook to delete an activity (soft delete)
- */
 export function useDeleteActivity() {
   const queryClient = useQueryClient();
 
@@ -200,10 +177,36 @@ export function useDeleteActivity() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: activitiesKeys.all });
-      toast.success('Activity deleted successfully');
+      toast.success('Activity deleted');
     },
     onError: (error: Error) => {
       toast.error(error.message || 'Failed to delete activity');
+    }
+  });
+}
+
+export function useBulkActivities() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: Parameters<typeof activitiesApi.bulk>[0]) => {
+      const response = await activitiesApi.bulk(data);
+      return response.data;
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: activitiesKeys.lists() });
+      const labels: Record<string, string> = {
+        markDone: 'marked as done',
+        markUndone: 'reopened',
+        changeOwner: 'reassigned',
+        changeType: 'type changed',
+        shiftDueDate: 'due date updated',
+        delete: 'deleted'
+      };
+      toast.success(`${data.count} activities ${labels[variables.action] || 'updated'}`);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Bulk action failed');
     }
   });
 }

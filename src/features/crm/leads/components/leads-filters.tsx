@@ -96,8 +96,8 @@ export function LeadsFilters({ onFilterChange }: LeadsFiltersProps) {
             <SelectValue placeholder='All statuses' />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value='NEW'>New</SelectItem>
-            <SelectItem value='IN_PROGRESS'>In Progress</SelectItem>
+            <SelectItem value='OPEN'>Open</SelectItem>
+            <SelectItem value='LOST'>Lost</SelectItem>
             <SelectItem value='CONVERTED'>Converted</SelectItem>
             <SelectItem value='ARCHIVED'>Archived</SelectItem>
           </SelectContent>

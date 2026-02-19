@@ -11,10 +11,13 @@ import {
   StageWithRelations,
   ActivityWithRelations,
   EmailWithRelations,
+  NoteWithRelations,
+  TimelineItem,
   PipelineWithDealsResponse,
   LeadConvertResponse,
   DeleteResponse
 } from './crm-types';
+import type { LeadLabel, DealLabel } from '@prisma/client';
 
 // Base API configuration
 const API_BASE = '/api/crm';
@@ -73,6 +76,8 @@ export const organizationsApi = {
     size?: string;
     skip?: number;
     take?: number;
+    sortBy?: string;
+    sortDesc?: boolean;
   }) => {
     const query = new URLSearchParams(
       Object.entries(params || {})
@@ -99,7 +104,27 @@ export const organizationsApi = {
   delete: (id: string) =>
     apiRequest<{ success: boolean }>(`/organizations/${id}`, {
       method: 'DELETE'
-    })
+    }),
+  getTimeline: (
+    id: string,
+    params?: { types?: string; skip?: number; take?: number }
+  ) => {
+    const query = new URLSearchParams(
+      Object.entries(params || {})
+        .filter(([_, v]) => v !== undefined)
+        .map(([k, v]) => [k, String(v)])
+    );
+    return apiRequest<{ items: TimelineItem[]; total: number }>(
+      `/organizations/${id}/timeline?${query}`
+    );
+  },
+  attachPersonsByDomain: (id: string) =>
+    apiRequest<{ attachedCount: number; message: string }>(
+      `/organizations/${id}/attach-persons-by-domain`,
+      {
+        method: 'POST'
+      }
+    )
 };
 
 // Persons API
@@ -144,6 +169,7 @@ export const leadsApi = {
     source?: string;
     ownerId?: string;
     search?: string;
+    wasSeen?: boolean;
     skip?: number;
     take?: number;
   }) => {
@@ -158,12 +184,12 @@ export const leadsApi = {
     }>(`/leads?${query}`);
   },
   getById: (id: string) => apiRequest<LeadWithRelations>(`/leads/${id}`),
-  create: (data: Partial<LeadWithRelations>) =>
+  create: (data: Record<string, unknown>) =>
     apiRequest<LeadWithRelations>('/leads', {
       method: 'POST',
       body: JSON.stringify(data)
     }),
-  update: (id: string, data: Partial<LeadWithRelations>) =>
+  update: (id: string, data: Record<string, unknown>) =>
     apiRequest<LeadWithRelations>(`/leads/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data)
@@ -179,7 +205,98 @@ export const leadsApi = {
         method: 'POST',
         body: JSON.stringify(data)
       }
-    )
+    ),
+  archive: (id: string) =>
+    apiRequest<LeadWithRelations>(`/leads/${id}/archive`, {
+      method: 'POST'
+    }),
+  restore: (id: string) =>
+    apiRequest<LeadWithRelations>(`/leads/${id}/restore`, {
+      method: 'POST'
+    }),
+  markSeen: (id: string) =>
+    apiRequest<LeadWithRelations>(`/leads/${id}/seen`, {
+      method: 'POST'
+    }),
+  getNotes: (id: string, params?: { pinned?: boolean; skip?: number; take?: number }) => {
+    const query = new URLSearchParams(
+      Object.entries(params || {})
+        .filter(([_, v]) => v !== undefined)
+        .map(([k, v]) => [k, String(v)])
+    );
+    return apiRequest<{ notes: NoteWithRelations[]; total: number }>(
+      `/leads/${id}/notes?${query}`
+    );
+  },
+  createNote: (id: string, data: { body: string; pinned?: boolean }) =>
+    apiRequest<NoteWithRelations>(`/leads/${id}/notes`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
+  getTimeline: (
+    id: string,
+    params?: { types?: string; skip?: number; take?: number }
+  ) => {
+    const query = new URLSearchParams(
+      Object.entries(params || {})
+        .filter(([_, v]) => v !== undefined)
+        .map(([k, v]) => [k, String(v)])
+    );
+    return apiRequest<{ items: TimelineItem[]; total: number }>(
+      `/leads/${id}/timeline?${query}`
+    );
+  }
+};
+
+// Lead Labels API
+export const leadLabelsApi = {
+  list: () => apiRequest<{ labels: LeadLabel[] }>('/lead-labels'),
+  create: (data: { name: string; color?: string }) =>
+    apiRequest<LeadLabel>('/lead-labels', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
+  update: (id: string, data: { name?: string; color?: string }) =>
+    apiRequest<LeadLabel>(`/lead-labels/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data)
+    }),
+  delete: (id: string) =>
+    apiRequest<{ success: boolean }>(`/lead-labels/${id}`, {
+      method: 'DELETE'
+    })
+};
+
+// Deal Labels API
+export const dealLabelsApi = {
+  list: () => apiRequest<{ labels: DealLabel[] }>('/deal-labels'),
+  create: (data: { name: string; color?: string }) =>
+    apiRequest<DealLabel>('/deal-labels', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
+  update: (id: string, data: { name?: string; color?: string }) =>
+    apiRequest<DealLabel>(`/deal-labels/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data)
+    }),
+  delete: (id: string) =>
+    apiRequest<{ success: boolean }>(`/deal-labels/${id}`, {
+      method: 'DELETE'
+    })
+};
+
+// Notes API (for standalone CRUD)
+export const notesApi = {
+  update: (id: string, data: { body?: string; pinned?: boolean }) =>
+    apiRequest<NoteWithRelations>(`/notes/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data)
+    }),
+  delete: (id: string) =>
+    apiRequest<{ success: boolean }>(`/notes/${id}`, {
+      method: 'DELETE'
+    })
 };
 
 // Deals API
@@ -228,6 +345,19 @@ export const dealsApi = {
     apiRequest<DealWithRelations>(`/deals/${id}/move`, {
       method: 'POST',
       body: JSON.stringify({ stageId })
+    }),
+  markAsWon: (id: string) =>
+    apiRequest<DealWithRelations>(`/deals/${id}/won`, {
+      method: 'POST'
+    }),
+  markAsLost: (id: string, reason?: string) =>
+    apiRequest<DealWithRelations>(`/deals/${id}/lost`, {
+      method: 'POST',
+      body: JSON.stringify({ reason })
+    }),
+  reopen: (id: string) =>
+    apiRequest<DealWithRelations>(`/deals/${id}/reopen`, {
+      method: 'POST'
     })
 };
 
@@ -257,17 +387,25 @@ export const pipelinesApi = {
 // Activities API
 export const activitiesApi = {
   list: (params?: {
+    status?: 'todo' | 'done' | 'all';
     type?: string;
-    done?: boolean;
-    ownerId?: string;
+    owner?: string;
     dealId?: string;
+    leadId?: string;
     personId?: string;
+    orgId?: string;
+    due?: 'overdue' | 'today' | 'week' | 'range';
+    from?: string;
+    to?: string;
+    q?: string;
+    sortBy?: string;
+    sortDesc?: boolean;
     skip?: number;
     take?: number;
   }) => {
     const query = new URLSearchParams(
       Object.entries(params || {})
-        .filter(([_, v]) => v !== undefined)
+        .filter(([_, v]) => v !== undefined && v !== null && v !== '')
         .map(([k, v]) => [k, String(v)])
     );
     return apiRequest<{
@@ -277,12 +415,12 @@ export const activitiesApi = {
   },
   getById: (id: string) =>
     apiRequest<ActivityWithRelations>(`/activities/${id}`),
-  create: (data: Partial<ActivityWithRelations>) =>
+  create: (data: Record<string, unknown>) =>
     apiRequest<ActivityWithRelations>('/activities', {
       method: 'POST',
       body: JSON.stringify(data)
     }),
-  update: (id: string, data: Partial<ActivityWithRelations>) =>
+  update: (id: string, data: Record<string, unknown>) =>
     apiRequest<ActivityWithRelations>(`/activities/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data)
@@ -290,6 +428,17 @@ export const activitiesApi = {
   delete: (id: string) =>
     apiRequest<{ success: boolean }>(`/activities/${id}`, {
       method: 'DELETE'
+    }),
+  bulk: (data: {
+    ids: string[];
+    action: 'markDone' | 'markUndone' | 'changeOwner' | 'changeType' | 'shiftDueDate' | 'delete';
+    ownerId?: string;
+    type?: string;
+    dueDateShiftDays?: number;
+  }) =>
+    apiRequest<{ success: boolean; count: number }>('/activities/bulk', {
+      method: 'POST',
+      body: JSON.stringify(data)
     })
 };
 

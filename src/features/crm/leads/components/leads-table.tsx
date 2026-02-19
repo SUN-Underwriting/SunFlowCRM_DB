@@ -51,14 +51,14 @@ interface LeadsTableProps {
 
 const getStatusBadgeVariant = (status: string) => {
   switch (status) {
-    case 'NEW':
+    case 'OPEN':
       return 'default' as const;
-    case 'IN_PROGRESS':
-      return 'secondary' as const;
+    case 'LOST':
+      return 'destructive' as const;
     case 'CONVERTED':
       return 'outline' as const;
     case 'ARCHIVED':
-      return 'destructive' as const;
+      return 'secondary' as const;
     default:
       return 'default' as const;
   }
@@ -122,7 +122,14 @@ export function LeadsTable({
         accessorKey: 'title',
         header: 'Title',
         cell: ({ row }) => (
-          <div className='font-medium'>{row.original.title}</div>
+          <div className='flex items-center gap-2'>
+            {row.original.wasSeen === false && (
+              <span className='h-2 w-2 shrink-0 rounded-full bg-blue-500' />
+            )}
+            <span className={row.original.wasSeen === false ? 'font-bold' : 'font-medium'}>
+              {row.original.title}
+            </span>
+          </div>
         )
       },
       {

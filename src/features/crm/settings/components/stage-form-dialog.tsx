@@ -126,7 +126,7 @@ export function StageFormDialog({
         probability: data.probability,
         isRotten: data.isRotten || false,
         pipelineId,
-        rottenDays: data.isRotten ? data.rottenDays : null
+        rottenDays: data.isRotten ? data.rottenDays : undefined
       } as any);
     },
     onSuccess: () => {
@@ -146,7 +146,7 @@ export function StageFormDialog({
         name: data.name,
         probability: data.probability,
         isRotten: data.isRotten || false,
-        rottenDays: data.isRotten ? data.rottenDays : null
+        rottenDays: data.isRotten ? data.rottenDays : undefined
       } as any);
     },
     onSuccess: () => {
