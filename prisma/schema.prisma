@@ -27,9 +27,10 @@ model Tenant {
   users User[]
 
   // Notification Relations
-  notifications           Notification[]
-  notificationPreferences NotificationPreference[]
-  entityWatchers          EntityWatcher[]
+  notifications             Notification[]
+  notificationPreferences   NotificationPreference[]
+  entityWatchers            EntityWatcher[]
+  notificationDeliveries    NotificationDelivery[]
 
   // CRM Relations
   organizations      Organization[]
@@ -87,9 +88,10 @@ model User {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Notification Relations
-  notifications           Notification[]
-  notificationPreferences NotificationPreference[]
-  entityWatchers          EntityWatcher[]
+  notifications             Notification[]
+  notificationPreferences   NotificationPreference[]
+  entityWatchers            EntityWatcher[]
+  notificationDeliveries    NotificationDelivery[]
 
   // CRM Relations
   ownedDeals         Deal[]              @relation("DealOwner")
@@ -202,8 +204,9 @@ model Notification {
   archivedAt    DateTime?
   createdAt     DateTime  @default(now())
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
 
   @@unique([tenantId, userId, sourceEventId])
   @@index([tenantId, userId, createdAt(sort: Desc)])
@@ -222,8 +225,9 @@ model NotificationPreference {
   tenantId         String
   userId           String
   notificationType String  // e.g. "crm.activity.assigned" or "*" for global
-  enabled          Boolean @default(true)
-  // v2: channels Json, digestMode String, quietFrom String, quietTo String, timezone String
+  inAppEnabled     Boolean @default(true)
+  emailEnabled     Boolean @default(false)
+  // v2: digestMode String, quietFrom String, quietTo String, timezone String
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -231,6 +235,39 @@ model NotificationPreference {
   @@unique([tenantId, userId, notificationType])
   @@index([tenantId, userId])
   @@map("notification_preferences")
+}
+
+model NotificationDelivery {
+  id             String         @id @default(cuid())
+  tenantId       String
+  notificationId String
+  userId         String
+  channel        String         // 'email' | 'sms' | 'push'
+  status         DeliveryStatus @default(PENDING)
+  provider       String?        // e.g. 'sendgrid', 'ses', 'smtp'
+  providerMsgId  String?        // provider-returned message ID
+  attempts       Int            @default(0)
+  lastError      String?        @db.Text
+  sentAt         DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId, channel])
+  @@index([status, createdAt])
+  @@index([notificationId])
+  @@map("notification_deliveries")
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+  SKIPPED
 }
 
 model EntityWatcher {
@@ -664,6 +701,17 @@ model Activity {
   deleted     Boolean      @default(false)
   deletedAt   DateTime?
 
+  // Reminder time: when to fire the DUE_SOON notification.
+  // Defaults to dueAt − 1 hour; can be overridden per activity.
+  // Reset to null whenever dueAt is changed so a fresh reminder fires.
+  remindAt  DateTime?
+
+  // Reminder notification tracking — prevents duplicate due_soon/overdue alerts.
+  // Set atomically by the activity-reminder scheduler job.
+  // Reset to null when dueAt is rescheduled so reminders re-fire.
+  dueSoonNotifiedAt DateTime?
+  overdueNotifiedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -678,6 +726,8 @@ model Activity {
   @@index([tenantId, done, dueAt])
   @@index([tenantId, ownerId, done, dueAt])
   @@index([tenantId, deleted])
+  @@index([tenantId, done, deleted, remindAt, dueSoonNotifiedAt])
+  @@index([tenantId, done, deleted, dueAt, overdueNotifiedAt])
   @@index([dealId])
   @@index([leadId])
   @@index([personId])

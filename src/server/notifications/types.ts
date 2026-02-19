@@ -1,7 +1,15 @@
+/**
+ * Sentinel value used as actorUserId for system-triggered events
+ * (schedulers, background jobs). Excluded from actor-exclusion filtering
+ * so that the real recipient (e.g. activity owner) still gets the notification.
+ */
+export const SYSTEM_ACTOR = 'system' as const;
+
 export const NotificationEventType = {
   ACTIVITY_ASSIGNED: 'crm.activity.assigned',
   ACTIVITY_DUE_SOON: 'crm.activity.due_soon',
   ACTIVITY_OVERDUE: 'crm.activity.overdue',
+  ACTIVITY_RESCHEDULED: 'crm.activity.rescheduled',
   DEAL_STAGE_CHANGED: 'crm.deal.stage_changed',
   DEAL_WON: 'crm.deal.won',
   DEAL_LOST: 'crm.deal.lost',
@@ -17,6 +25,7 @@ export type NotificationEventType =
 
 export interface OutboxEventInput {
   tenantId: string;
+  /** Use SYSTEM_ACTOR for background/scheduler-triggered events. */
   actorUserId: string;
   type: NotificationEventType;
   entityKind: string;

@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
-import { NotificationEventType } from './types';
+import { NotificationEventType, SYSTEM_ACTOR } from './types';
 
 interface RecipientContext {
   tenantId: string;
@@ -11,8 +11,11 @@ interface RecipientContext {
 
 /**
  * Resolve recipient userIds for a given event type.
- * Applies actor exclusion: the user who triggered the event never receives
- * a notification about it.
+ *
+ * Actor exclusion: the user who triggered the event does NOT receive
+ * a notification about their own action — UNLESS the actor is SYSTEM_ACTOR
+ * (background scheduler). Reminders must always reach the real recipient
+ * even when they set the activity themselves.
  */
 export async function resolveRecipients(
   type: string,
@@ -20,6 +23,7 @@ export async function resolveRecipients(
 ): Promise<string[]> {
   const raw = await resolveRaw(type, ctx);
   const unique = [...new Set(raw)];
+  if (ctx.actorUserId === SYSTEM_ACTOR) return unique;
   return unique.filter((uid) => uid !== ctx.actorUserId);
 }
 
@@ -31,7 +35,8 @@ async function resolveRaw(
 
   switch (type) {
     case NotificationEventType.ACTIVITY_ASSIGNED:
-    case NotificationEventType.ACTIVITY_DUE_SOON: {
+    case NotificationEventType.ACTIVITY_DUE_SOON:
+    case NotificationEventType.ACTIVITY_RESCHEDULED: {
       const assigneeId = (payload.assigneeId ?? payload.ownerId) as
         | string
         | undefined;

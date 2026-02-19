@@ -6,6 +6,8 @@ const baseConfig: NextConfig = {
   turbopack: {
     root: __dirname
   },
+  // BullMQ uses ioredis which must be treated as an external server-side package
+  serverExternalPackages: ['ioredis', 'bullmq'],
   images: {
     remotePatterns: [
       {

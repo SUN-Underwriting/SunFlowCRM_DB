@@ -10,8 +10,10 @@ export const redisConnection = {
 };
 
 export const QUEUE_NAME = 'notifications';
+export const EMAIL_QUEUE_NAME = 'email-delivery';
 
 let _queue: Queue | null = null;
+let _emailQueue: Queue | null = null;
 
 export function getNotificationsQueue(): Queue {
   if (!_queue) {
@@ -26,6 +28,21 @@ export function getNotificationsQueue(): Queue {
     });
   }
   return _queue;
+}
+
+export function getEmailQueue(): Queue {
+  if (!_emailQueue) {
+    _emailQueue = new Queue(EMAIL_QUEUE_NAME, {
+      connection: redisConnection,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: { count: 500 },
+        removeOnFail: { count: 2000 },
+      },
+    });
+  }
+  return _emailQueue;
 }
 
 /**

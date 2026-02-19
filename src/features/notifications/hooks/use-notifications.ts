@@ -2,15 +2,25 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-interface Notification {
+export interface Notification {
   id: string;
   type: string;
   title: string;
   body: string;
   data: Record<string, unknown>;
   severity: string;
+  sourceEventId?: string | null;
   readAt: string | null;
+  archivedAt?: string | null;
   createdAt: string;
+}
+
+interface FetchOptions {
+  cursor?: string;
+  limit?: number;
+  unreadOnly?: boolean;
+  types?: string[];
+  replace?: boolean;
 }
 
 interface NotificationsState {
@@ -23,7 +33,7 @@ interface NotificationsState {
 
 const POLL_INTERVAL_MS = 60_000;
 
-export function useNotifications() {
+export function useNotifications(opts: { unreadOnly?: boolean; types?: string[] } = {}) {
   const [state, setState] = useState<NotificationsState>({
     items: [],
     unreadCount: 0,
@@ -42,15 +52,25 @@ export function useNotifications() {
         setState((prev) => ({ ...prev, unreadCount: data.count }));
       }
     } catch {
-      // Silently fail
+      // Silently fail — unread count is non-critical
     }
   }, []);
 
   const fetchNotifications = useCallback(
-    async (cursor?: string) => {
+    async (fetchOpts: FetchOptions = {}) => {
+      const {
+        cursor,
+        limit = 20,
+        unreadOnly = opts.unreadOnly,
+        types = opts.types,
+        replace = !cursor,
+      } = fetchOpts;
+
       try {
-        const params = new URLSearchParams({ limit: '15' });
+        const params = new URLSearchParams({ limit: String(limit) });
         if (cursor) params.set('cursor', cursor);
+        if (unreadOnly) params.set('unreadOnly', '1');
+        if (types && types.length > 0) params.set('types', types.join(','));
 
         const res = await fetch(`/api/notifications?${params}`);
         if (!res.ok) return;
@@ -58,9 +78,7 @@ export function useNotifications() {
         const { data } = await res.json();
         setState((prev) => ({
           ...prev,
-          items: cursor
-            ? [...prev.items, ...data.items]
-            : data.items,
+          items: replace ? data.items : [...prev.items, ...data.items],
           hasMore: data.hasMore,
           nextCursor: data.nextCursor,
           isLoading: false,
@@ -69,12 +87,12 @@ export function useNotifications() {
         setState((prev) => ({ ...prev, isLoading: false }));
       }
     },
-    []
+    [opts.unreadOnly, opts.types]
   );
 
   const loadMore = useCallback(() => {
     if (state.hasMore && state.nextCursor) {
-      fetchNotifications(state.nextCursor);
+      fetchNotifications({ cursor: state.nextCursor, replace: false });
     }
   }, [state.hasMore, state.nextCursor, fetchNotifications]);
 
@@ -101,26 +119,44 @@ export function useNotifications() {
     }));
   }, []);
 
+  const archive = useCallback(async (id: string) => {
+    await fetch(`/api/notifications/${id}/archive`, { method: 'POST' });
+    setState((prev) => ({
+      ...prev,
+      items: prev.items.filter((n) => n.id !== id),
+    }));
+  }, []);
+
+  const refresh = useCallback(() => {
+    fetchUnreadCount();
+    fetchNotifications({ replace: true });
+  }, [fetchUnreadCount, fetchNotifications]);
+
   // SSE subscription with polling fallback
   useEffect(() => {
     fetchUnreadCount();
-    fetchNotifications();
+    fetchNotifications({ replace: true });
 
     let sseConnected = false;
+
+    function startPolling() {
+      if (pollTimerRef.current) return;
+      pollTimerRef.current = setInterval(fetchUnreadCount, POLL_INTERVAL_MS);
+    }
 
     try {
       const es = new EventSource('/api/notifications/sse');
       eventSourceRef.current = es;
 
       es.addEventListener('unread_count', (e) => {
-        const data = JSON.parse(e.data);
-        setState((prev) => ({ ...prev, unreadCount: data.count }));
+        const d = JSON.parse(e.data) as { count: number };
+        setState((prev) => ({ ...prev, unreadCount: d.count }));
         sseConnected = true;
       });
 
       es.addEventListener('notification.new', () => {
         fetchUnreadCount();
-        fetchNotifications();
+        fetchNotifications({ replace: true });
         sseConnected = true;
       });
 
@@ -135,11 +171,6 @@ export function useNotifications() {
       startPolling();
     }
 
-    function startPolling() {
-      if (pollTimerRef.current) return;
-      pollTimerRef.current = setInterval(fetchUnreadCount, POLL_INTERVAL_MS);
-    }
-
     return () => {
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
@@ -148,16 +179,15 @@ export function useNotifications() {
         pollTimerRef.current = null;
       }
     };
-  }, [fetchUnreadCount, fetchNotifications]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return {
     ...state,
     loadMore,
     markAsRead,
     markAllAsRead,
-    refresh: () => {
-      fetchUnreadCount();
-      fetchNotifications();
-    },
+    archive,
+    refresh,
   };
 }

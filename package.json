@@ -15,6 +15,10 @@
     "format": "prettier --write .",
     "format:check": "prettier -c -w .",
     "worker:notifications": "npx tsx workers/notifications-worker.ts",
+    "queue:status": "npx tsx scripts/queue/check-queues.ts",
+    "queue:failed": "npx tsx scripts/queue/check-queues.ts --failed",
+    "queue:clean": "npx tsx scripts/queue/check-queues.ts --clean",
+    "queue:retry": "npx tsx scripts/queue/check-queues.ts --retry-pending",
     "prepare": "husky"
   },
   "lint-staged": {

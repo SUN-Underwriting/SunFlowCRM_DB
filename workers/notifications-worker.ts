@@ -1,12 +1,21 @@
 import 'dotenv/config';
-import { Worker, Job } from 'bullmq';
+import { Worker, Queue, Job } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { processEvent } from '@/server/notifications/service';
-import { redisConnection, QUEUE_NAME } from '@/server/notifications/queue';
+import { redisConnection, QUEUE_NAME, EMAIL_QUEUE_NAME } from '@/server/notifications/queue';
+import { runActivityReminderJob } from '@/server/notifications/activity-reminder-job';
+import { emailService } from '@/server/notifications/email-service';
+import { renderTemplate } from '@/server/notifications/templates';
+
+const REMINDER_QUEUE_NAME = 'activity-reminders';
+const REMINDER_JOB_NAME = 'scan-due-activities';
+/** Run reminder scan every 5 minutes */
+const REMINDER_INTERVAL_MS = 5 * 60 * 1000;
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+let isShuttingDown = false;
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
@@ -124,6 +133,128 @@ worker.on('failed', (job, err) => {
   console.error(`[Worker] Job ${job?.id} failed:`, err.message);
 });
 
+// ---------------------------------------------------------------------------
+// Activity Reminder Scheduler
+// Uses a separate BullMQ queue with a repeatable job so the scan runs
+// every 5 minutes independently of the outbox processor above.
+// ---------------------------------------------------------------------------
+
+const reminderQueue = new Queue(REMINDER_QUEUE_NAME, { connection: redisConnection });
+
+const reminderWorker = new Worker(
+  REMINDER_QUEUE_NAME,
+  async () => {
+    await runActivityReminderJob(prisma);
+  },
+  { connection: redisConnection, concurrency: 1 }
+);
+
+reminderWorker.on('completed', () => {
+  console.log('[Reminder] Scan completed');
+});
+
+reminderWorker.on('failed', (_job, err) => {
+  console.error('[Reminder] Scan failed:', err.message);
+});
+
+// ---------------------------------------------------------------------------
+// Email Delivery Worker
+// Processes email-delivery jobs created by the fanout in service.ts.
+// ---------------------------------------------------------------------------
+
+interface EmailJobData {
+  deliveryId: string;
+  tenantId: string;
+  type: string;
+  subject: string;
+  payload: Record<string, unknown>;
+}
+
+const emailWorker = new Worker<EmailJobData>(
+  EMAIL_QUEUE_NAME,
+  async (job: Job<EmailJobData>) => {
+    const { deliveryId, tenantId, type, payload } = job.data;
+
+    // Atomic claim: PENDING → SENDING
+    const claim = await prisma.notificationDelivery.updateMany({
+      where: { id: deliveryId, status: 'PENDING', tenantId },
+      data: { status: 'SENDING' },
+    });
+
+    if (claim.count === 0) {
+      console.log(`[Email] Delivery ${deliveryId} already claimed, skipping`);
+      return;
+    }
+
+    const delivery = await prisma.notificationDelivery.findUnique({
+      where: { id: deliveryId },
+      include: { user: { select: { email: true, firstName: true, lastName: true } } },
+    });
+
+    if (!delivery) {
+      console.warn(`[Email] Delivery ${deliveryId} not found after claim`);
+      return;
+    }
+
+    const { title: subject, body: text } = renderTemplate(type, 'email', payload);
+    const toEmail = delivery.user.email;
+
+    try {
+      const result = await emailService.send({ to: toEmail, subject, text });
+
+      await prisma.notificationDelivery.update({
+        where: { id: deliveryId },
+        data: {
+          status: 'SENT',
+          sentAt: new Date(),
+          providerMsgId: result.providerMsgId,
+          attempts: { increment: 1 },
+        },
+      });
+
+      console.log(`[Email] Sent delivery ${deliveryId} to ${toEmail}`);
+    } catch (err) {
+      const attempts = (delivery.attempts ?? 0) + 1;
+      const maxAttempts = 3;
+
+      await prisma.notificationDelivery.update({
+        where: { id: deliveryId },
+        data: {
+          status: attempts >= maxAttempts ? 'FAILED' : 'PENDING',
+          attempts: { increment: 1 },
+          lastError: err instanceof Error ? err.message : String(err),
+        },
+      });
+
+      throw err;
+    }
+  },
+  { connection: redisConnection, concurrency: 3 }
+);
+
+emailWorker.on('completed', (job) => {
+  console.log(`[Email] Job ${job.id} completed`);
+});
+
+emailWorker.on('failed', (job, err) => {
+  console.error(`[Email] Job ${job?.id} failed:`, err.message);
+});
+
+// Register the repeatable job using upsertJobScheduler (modern BullMQ API).
+// Safe to call on every startup — upsert is idempotent, no duplicate schedules.
+reminderQueue
+  .upsertJobScheduler(
+    REMINDER_JOB_NAME,
+    { every: REMINDER_INTERVAL_MS },
+    { name: REMINDER_JOB_NAME, data: {}, opts: {} },
+  )
+  .then(() => {
+    console.log(`[Reminder] Job scheduler upserted (every ${REMINDER_INTERVAL_MS / 1000}s)`);
+  })
+  .catch((err) => {
+    console.error('[Reminder] Failed to upsert job scheduler:', err);
+  });
+
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const INTERNAL_SECRET = requireEnv('INTERNAL_WORKER_SECRET');
 
@@ -149,6 +280,8 @@ async function pushSseEvent(
 console.log(`[Worker] Notifications worker started, listening on queue "${QUEUE_NAME}"`);
 
 async function gracefulShutdown(signal: string) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
   console.log(`[Worker] Received ${signal}, shutting down...`);
 
   // Force exit after 30s if jobs don't finish — prevents infinite hang
@@ -158,7 +291,12 @@ async function gracefulShutdown(signal: string) {
   }, 30_000);
 
   try {
-    await worker.close();
+    await Promise.all([
+      worker.close(),
+      reminderWorker.close(),
+      emailWorker.close(),
+      reminderQueue.close(),
+    ]);
     await pool.end();
     clearTimeout(forceExit);
     console.log('[Worker] Shutdown complete');

@@ -6,10 +6,74 @@ import { publishOutboxEvent } from '@/server/notifications/outbox';
 import { enqueueOutboxJob } from '@/server/notifications/queue';
 import { NotificationEventType } from '@/server/notifications/types';
 
+/** Default reminder offset: 1 hour before dueAt */
+const DEFAULT_REMIND_OFFSET_MS = 60 * 60 * 1000;
+
+function computeDefaultRemindAt(dueAt: Date): Date {
+  return new Date(dueAt.getTime() - DEFAULT_REMIND_OFFSET_MS);
+}
+
+/**
+ * Convert flat UpdateActivityInput to Prisma.ActivityUpdateInput (checked variant).
+ *
+ * Prisma 7 with $extends + PrismaPg validates the `data` argument inside
+ * $transaction using the "checked" ActivityUpdateInput type, which does NOT
+ * accept scalar FK fields (dealId, leadId, etc.). They must be expressed as
+ * relation operations: `deal: { connect: { id } }` or `deal: { disconnect: true }`.
+ *
+ * This converter maps each optional FK field to the correct relational syntax so
+ * the RLS extension's validateRelationTenantAccess also gets the connect/disconnect
+ * information it expects.
+ */
+function toActivityUpdateInput(
+  input: Omit<UpdateActivityInput, 'dealId' | 'leadId' | 'personId' | 'orgId' | 'ownerId'> & {
+    dealId?: string | null;
+    leadId?: string | null;
+    personId?: string | null;
+    orgId?: string | null;
+    ownerId?: string;
+    remindAt?: Date | null;
+    dueSoonNotifiedAt?: Date | null;
+    overdueNotifiedAt?: Date | null;
+    completedAt?: Date | null;
+  }
+): Prisma.ActivityUpdateInput {
+  const {
+    dealId,
+    leadId,
+    personId,
+    orgId,
+    ownerId,
+    ...rest
+  } = input;
+
+  const data: Prisma.ActivityUpdateInput = { ...rest };
+
+  if (dealId !== undefined) {
+    data.deal = dealId ? { connect: { id: dealId } } : { disconnect: true };
+  }
+  if (leadId !== undefined) {
+    data.lead = leadId ? { connect: { id: leadId } } : { disconnect: true };
+  }
+  if (personId !== undefined) {
+    data.person = personId ? { connect: { id: personId } } : { disconnect: true };
+  }
+  if (orgId !== undefined) {
+    data.organization = orgId ? { connect: { id: orgId } } : { disconnect: true };
+  }
+  if (ownerId !== undefined) {
+    data.owner = { connect: { id: ownerId } };
+  }
+
+  return data;
+}
+
 export interface CreateActivityInput {
   type: ActivityType;
   subject: string;
   dueAt?: Date;
+  /** Custom reminder time. Defaults to dueAt − 1 hour when dueAt is set. */
+  remindAt?: Date;
   hasTime?: boolean;
   durationMin?: number;
   busyFlag?: BusyFlag;
@@ -24,6 +88,8 @@ export interface UpdateActivityInput {
   type?: ActivityType;
   subject?: string;
   dueAt?: Date | null;
+  /** Explicit reminder time. Pass null to clear; omit to auto-recalculate from new dueAt. */
+  remindAt?: Date | null;
   hasTime?: boolean;
   durationMin?: number | null;
   busyFlag?: BusyFlag;
@@ -265,12 +331,20 @@ export class ActivityService extends BaseService {
     // Validate linked entities belong to tenant
     await this.validateLinks(input);
 
+    // Auto-compute remindAt = dueAt − 1h unless explicitly provided
+    const remindAt = input.remindAt ?? (input.dueAt ? computeDefaultRemindAt(input.dueAt) : undefined);
+
+    // Assignee: use provided ownerId (assign to another user) or fall back to creator
+    const assigneeId = input.ownerId ?? userId;
+
     const activity = await prisma.$transaction(async (tx) => {
+      const { ownerId: _ignored, ...inputWithoutOwnerId } = input;
       const created = await tx.activity.create({
         data: {
-          ...input,
+          ...inputWithoutOwnerId,
+          remindAt,
           tenantId,
-          ownerId: userId
+          ownerId: assigneeId,
         },
         include: {
           owner: { select: { id: true, firstName: true, lastName: true, email: true } },
@@ -288,6 +362,9 @@ export class ActivityService extends BaseService {
         orgId: input.orgId
       }]);
 
+      // ACTIVITY_ASSIGNED: actor exclusion handles the self-assignment case —
+      // if the user creates an activity for themselves the recipient list will
+      // be filtered to empty and no notification is sent.
       const outboxId = await publishOutboxEvent(tx, {
         tenantId,
         actorUserId: userId,
@@ -295,11 +372,12 @@ export class ActivityService extends BaseService {
         entityKind: 'activity',
         entityId: created.id,
         payload: {
-          assigneeId: userId,
-          ownerId: userId,
+          assigneeId: assigneeId,
+          ownerId: assigneeId,
           activitySubject: created.subject,
           activityType: created.type,
           dueAt: created.dueAt?.toISOString() ?? null,
+          entityName: buildEntityName(created.deal?.title, created.lead?.title),
           dealId: created.dealId,
           leadId: created.leadId,
         },
@@ -334,14 +412,33 @@ export class ActivityService extends BaseService {
 
     await this.validateLinks(input);
 
-    const activity = await prisma.$transaction(async (tx) => {
-      const updateData: Prisma.ActivityUpdateInput = { ...input };
+    const dueAtChanged = 'dueAt' in input && String(input.dueAt) !== String(existing!.dueAt);
+    const ownerChanged = !!input.ownerId && input.ownerId !== existing!.ownerId;
 
-      if (input.done === true && !existing!.done) {
-        updateData.completedAt = new Date();
-      } else if (input.done === false) {
-        updateData.completedAt = null;
+    // When dueAt is rescheduled: recalculate remindAt (unless caller overrides it explicitly)
+    // and reset notification flags so fresh reminders fire for the new time.
+    let remindAtUpdate: Date | null | undefined;
+    if (dueAtChanged) {
+      if ('remindAt' in input) {
+        remindAtUpdate = input.remindAt ?? null;
+      } else {
+        remindAtUpdate = input.dueAt ? computeDefaultRemindAt(input.dueAt) : null;
       }
+    } else if ('remindAt' in input) {
+      remindAtUpdate = input.remindAt ?? null;
+    }
+
+    const activity = await prisma.$transaction(async (tx) => {
+      // Build the checked ActivityUpdateInput: FK fields use relation connect/disconnect syntax.
+      // Inside $transaction on an $extends client (Prisma 7 + PrismaPg), the query extension
+      // validates data as ActivityUpdateInput (checked), so scalar FK fields must NOT be used.
+      const updateData = toActivityUpdateInput({
+        ...input,
+        ...(remindAtUpdate !== undefined ? { remindAt: remindAtUpdate } : {}),
+        ...(dueAtChanged ? { dueSoonNotifiedAt: null, overdueNotifiedAt: null } : {}),
+        ...(input.done === true && !existing!.done ? { completedAt: new Date() } : {}),
+        ...(input.done === false ? { completedAt: null } : {}),
+      });
 
       const updated = await tx.activity.update({
         where: { id },
@@ -361,9 +458,13 @@ export class ActivityService extends BaseService {
         { dealId: updated.dealId, leadId: updated.leadId, personId: updated.personId, orgId: updated.orgId }
       ]);
 
-      let outboxId: string | null = null;
-      if (input.ownerId && input.ownerId !== existing!.ownerId) {
-        outboxId = await publishOutboxEvent(tx, {
+      const outboxIds: string[] = [];
+      const effectiveOwnerId = updated.ownerId;
+      const entityName = buildEntityName(updated.deal?.title, updated.lead?.title);
+
+      // ACTIVITY_ASSIGNED: new assignee notified (actor exclusion handles self-assignment)
+      if (ownerChanged) {
+        outboxIds.push(await publishOutboxEvent(tx, {
           tenantId,
           actorUserId: userId,
           type: NotificationEventType.ACTIVITY_ASSIGNED,
@@ -375,19 +476,40 @@ export class ActivityService extends BaseService {
             activitySubject: updated.subject,
             activityType: updated.type,
             dueAt: updated.dueAt?.toISOString() ?? null,
+            entityName,
             dealId: updated.dealId,
             leadId: updated.leadId,
           },
           sourceEventId: `crm.activity.assigned:${id}:reassign:${Date.now()}`,
-        });
+        }));
       }
 
-      return { updated, outboxId };
+      // ACTIVITY_RESCHEDULED: notify the assignee when SOMEONE ELSE changes their dueAt
+      if (dueAtChanged && userId !== effectiveOwnerId) {
+        outboxIds.push(await publishOutboxEvent(tx, {
+          tenantId,
+          actorUserId: userId,
+          type: NotificationEventType.ACTIVITY_RESCHEDULED,
+          entityKind: 'activity',
+          entityId: id,
+          payload: {
+            assigneeId: effectiveOwnerId,
+            ownerId: effectiveOwnerId,
+            activitySubject: updated.subject,
+            activityType: updated.type,
+            dueAt: updated.dueAt?.toISOString() ?? null,
+            entityName,
+            dealId: updated.dealId,
+            leadId: updated.leadId,
+          },
+          sourceEventId: `crm.activity.rescheduled:${id}:${Date.now()}`,
+        }));
+      }
+
+      return { updated, outboxIds };
     });
 
-    if (activity.outboxId) {
-      enqueueOutboxJob(activity.outboxId);
-    }
+    activity.outboxIds.forEach((oid) => enqueueOutboxJob(oid));
 
     await AuditService.log({
       tenantId,
@@ -574,6 +696,13 @@ export class ActivityService extends BaseService {
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
+
+/** Build a human-readable entity context suffix for notification bodies */
+function buildEntityName(dealTitle?: string | null, leadTitle?: string | null): string {
+  if (dealTitle) return ` on "${dealTitle}"`;
+  if (leadTitle) return ` on "${leadTitle}"`;
+  return '';
+}
 
 function buildOrderBy(
   sortBy: ActivityFilters['sortBy'],

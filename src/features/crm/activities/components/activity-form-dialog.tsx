@@ -52,7 +52,8 @@ import {
   IconBriefcase,
   IconUser,
   IconX,
-  IconLoader2
+  IconLoader2,
+  IconBell,
 } from '@tabler/icons-react';
 import { useCreateActivity, useUpdateActivity } from '../hooks/use-activities';
 import { dealsApi, personsApi, organizationsApi, leadsApi } from '@/lib/api/crm-client';
@@ -91,19 +92,34 @@ const DURATION_PRESETS = [
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
+/** Reminder offset options relative to dueAt (in minutes). null = no reminder. */
+const REMINDER_PRESETS = [
+  { label: 'None',       value: null    },
+  { label: '15 min',     value: 15      },
+  { label: '30 min',     value: 30      },
+  { label: '1 hour',     value: 60      },
+  { label: '2 hours',    value: 120     },
+  { label: '1 day',      value: 1440    },
+  { label: '2 days',     value: 2880    },
+] as const;
+
+type ReminderPresetValue = (typeof REMINDER_PRESETS)[number]['value'];
+
 const activityFormSchema = z.object({
-  type:        z.enum(ACTIVITY_TYPES),
-  subject:     z.string().min(1, 'Subject is required').max(200),
-  dueAt:       z.date().optional(),
-  hasTime:     z.boolean(),
-  dueTime:     z.string().optional(),
-  durationMin: z.coerce.number().int().min(1).max(1440).optional(),
-  busyFlag:    z.enum(['FREE', 'BUSY']),
-  dealId:      z.string().optional(),
-  leadId:      z.string().optional(),
-  personId:    z.string().optional(),
-  orgId:       z.string().optional(),
-  note:        z.string().optional()
+  type:           z.enum(ACTIVITY_TYPES),
+  subject:        z.string().min(1, 'Subject is required').max(200),
+  dueAt:          z.date().optional(),
+  hasTime:        z.boolean(),
+  dueTime:        z.string().optional(),
+  durationMin:    z.coerce.number().int().min(1).max(1440).optional(),
+  busyFlag:       z.enum(['FREE', 'BUSY']),
+  /** null = no reminder, number = minutes before dueAt */
+  reminderOffset: z.number().nullable().optional(),
+  dealId:         z.string().optional(),
+  leadId:         z.string().optional(),
+  personId:       z.string().optional(),
+  orgId:          z.string().optional(),
+  note:           z.string().optional()
 });
 
 type ActivityFormValues = z.infer<typeof activityFormSchema>;
@@ -148,10 +164,11 @@ export function ActivityFormDialog({
     mode: 'onChange'
   });
 
-  const hasTime = form.watch('hasTime');
-  const type    = form.watch('type');
-  const dueAt   = form.watch('dueAt');
-  const note    = form.watch('note') ?? '';
+  const hasTime        = form.watch('hasTime');
+  const type           = form.watch('type');
+  const dueAt          = form.watch('dueAt');
+  const note           = form.watch('note') ?? '';
+  const reminderOffset = form.watch('reminderOffset');
 
   // Reset + load on open
   useEffect(() => {
@@ -223,10 +240,20 @@ export function ActivityFormDialog({
       dueAt = new Date(dueAt);
       dueAt.setHours(h, m, 0, 0);
     }
+
+    // Compute remindAt from offset (minutes before dueAt), null = no reminder
+    let remindAt: Date | null | undefined;
+    if (dueAt && values.reminderOffset != null) {
+      remindAt = new Date(dueAt.getTime() - values.reminderOffset * 60_000);
+    } else if (values.reminderOffset === null) {
+      remindAt = null; // explicitly disable
+    }
+
     const payload = {
       type:        values.type,
       subject:     values.subject,
       dueAt,
+      remindAt,
       hasTime:     values.hasTime,
       durationMin: values.durationMin || undefined,
       busyFlag:    values.busyFlag === 'BUSY' ? BusyFlag.BUSY : BusyFlag.FREE,
@@ -497,6 +524,47 @@ export function ActivityFormDialog({
                 )}
               </div>
 
+              {/* ─ Reminder ─ (only when dueAt is set) */}
+              {dueAt && (
+                <div className='px-6 py-4'>
+                  <FormField
+                    control={form.control}
+                    name='reminderOffset'
+                    render={({ field }) => (
+                      <FormItem>
+                        <div className='flex items-center gap-3'>
+                          <div className='flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider shrink-0'>
+                            <IconBell className='h-3.5 w-3.5' />
+                            Remind
+                          </div>
+                          <div className='flex flex-wrap gap-1.5'>
+                            {REMINDER_PRESETS.map((preset) => {
+                              const isActive = field.value === preset.value ||
+                                (preset.value === null && field.value == null);
+                              return (
+                                <button
+                                  key={String(preset.value)}
+                                  type='button'
+                                  onClick={() => field.onChange(preset.value)}
+                                  className={cn(
+                                    'h-7 rounded-md border px-2.5 text-xs font-medium transition-colors',
+                                    isActive
+                                      ? 'border-primary bg-primary text-primary-foreground'
+                                      : 'border-input bg-background hover:bg-muted text-muted-foreground hover:text-foreground'
+                                  )}
+                                >
+                                  {preset.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              )}
+
               {/* ─ Link to ─ */}
               <div className='px-6 py-5 space-y-3'>
                 <p className='text-xs font-medium text-muted-foreground uppercase tracking-wider'>Link to</p>
@@ -682,6 +750,19 @@ function LinkedEntitySelect({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Derive reminder offset (minutes) from existing remindAt + dueAt. */
+function deriveReminderOffset(
+  dueAt: Date | undefined,
+  remindAt: string | Date | null | undefined
+): number | null | undefined {
+  if (!dueAt || remindAt == null) return remindAt === null ? null : undefined;
+  const diff = dueAt.getTime() - new Date(remindAt).getTime();
+  const minutes = Math.round(diff / 60_000);
+  // Snap to nearest preset if close, otherwise return raw minutes
+  const preset = REMINDER_PRESETS.find((p) => p.value !== null && Math.abs((p.value as number) - minutes) < 2);
+  return preset?.value ?? minutes;
+}
+
 function buildDefaultValues(
   activity: ActivityWithRelations | undefined,
   defaults: {
@@ -694,29 +775,32 @@ function buildDefaultValues(
   if (activity) {
     const dueAt   = activity.dueAt ? new Date(activity.dueAt) : undefined;
     const dueTime = dueAt && activity.hasTime ? format(dueAt, 'HH:mm') : undefined;
+    const remindAt = (activity as ActivityWithRelations & { remindAt?: string | null }).remindAt;
     return {
-      type:        activity.type as ActivityTypeValue,
-      subject:     activity.subject,
+      type:           activity.type as ActivityTypeValue,
+      subject:        activity.subject,
       dueAt,
-      hasTime:     activity.hasTime ?? false,
+      hasTime:        activity.hasTime ?? false,
       dueTime,
-      durationMin: activity.durationMin ?? undefined,
-      busyFlag:    (activity.busyFlag ?? 'FREE') as 'FREE' | 'BUSY',
-      dealId:      activity.deal?.id ?? undefined,
-      leadId:      (activity as ActivityWithRelations & { lead?: { id: string } | null }).lead?.id ?? undefined,
-      personId:    activity.person?.id ?? undefined,
-      orgId:       activity.organization?.id ?? undefined,
-      note:        activity.note ?? undefined
+      durationMin:    activity.durationMin ?? undefined,
+      busyFlag:       (activity.busyFlag ?? 'FREE') as 'FREE' | 'BUSY',
+      reminderOffset: deriveReminderOffset(dueAt, remindAt),
+      dealId:         activity.deal?.id ?? undefined,
+      leadId:         (activity as ActivityWithRelations & { lead?: { id: string } | null }).lead?.id ?? undefined,
+      personId:       activity.person?.id ?? undefined,
+      orgId:          activity.organization?.id ?? undefined,
+      note:           activity.note ?? undefined
     };
   }
   return {
-    type:     'TASK',
-    subject:  '',
-    hasTime:  false,
-    busyFlag: 'FREE',
-    dealId:   defaults.defaultDealId ?? undefined,
-    leadId:   defaults.defaultLeadId ?? undefined,
-    personId: defaults.defaultPersonId ?? undefined,
-    orgId:    defaults.defaultOrgId ?? undefined
+    type:           'TASK',
+    subject:        '',
+    hasTime:        false,
+    busyFlag:       'FREE',
+    reminderOffset: 60, // default: 1 hour before
+    dealId:         defaults.defaultDealId ?? undefined,
+    leadId:         defaults.defaultLeadId ?? undefined,
+    personId:       defaults.defaultPersonId ?? undefined,
+    orgId:          defaults.defaultOrgId ?? undefined
   };
 }

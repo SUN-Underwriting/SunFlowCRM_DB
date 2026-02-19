@@ -331,9 +331,13 @@ export const CommonSchemas = {
     type: z.enum(['CALL', 'MEETING', 'TASK', 'EMAIL', 'DEADLINE', 'LUNCH']),
     subject: z.string().min(1, 'Subject is required').max(200),
     dueAt: z.coerce.date().optional(),
+    /** Explicit reminder time. Defaults to dueAt − 1 hour when dueAt is set. */
+    remindAt: z.coerce.date().optional(),
     hasTime: z.boolean().optional(),
     durationMin: z.number().int().min(1).max(1440).optional(),
     busyFlag: z.enum(['FREE', 'BUSY']).optional(),
+    /** Assign to another team member. Defaults to the current user. */
+    ownerId: z.string().min(1).optional(),
     dealId: z.string().min(1).optional(),
     leadId: z.string().min(1).optional(),
     personId: z.string().min(1).optional(),
@@ -345,6 +349,8 @@ export const CommonSchemas = {
     type: z.enum(['CALL', 'MEETING', 'TASK', 'EMAIL', 'DEADLINE', 'LUNCH']).optional(),
     subject: z.string().min(1).max(200).optional(),
     dueAt: z.coerce.date().nullable().optional(),
+    /** Explicit reminder time. Pass null to clear; omit to auto-recalculate from new dueAt. */
+    remindAt: z.coerce.date().nullable().optional(),
     hasTime: z.boolean().optional(),
     durationMin: z.number().int().min(1).max(1440).nullable().optional(),
     busyFlag: z.enum(['FREE', 'BUSY']).optional(),
@@ -407,10 +413,11 @@ export const CommonSchemas = {
   listNotificationsQuery: z.object({
     cursor: z.string().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(50).default(20),
+    // Accept '1', 'true', or 'yes' for truthy unreadOnly param
     unreadOnly: z
       .string()
       .optional()
-      .transform((v) => v === 'true'),
+      .transform((v) => v === 'true' || v === '1' || v === 'yes'),
   }),
 
   internalPushBody: z.object({

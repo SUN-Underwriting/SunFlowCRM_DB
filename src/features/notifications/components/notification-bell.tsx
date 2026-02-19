@@ -1,6 +1,7 @@
 'use client';
 
-import { Bell, Check, CheckCheck } from 'lucide-react';
+import { Bell, CheckCheck } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
   Popover,
@@ -12,7 +13,21 @@ import { useNotifications } from '../hooks/use-notifications';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 
+/** Build a deep-link path from notification data. Returns null when no entity. */
+function buildEntityPath(data: Record<string, unknown>): string | null {
+  const kind = data.entityKind as string | undefined;
+  const id = data.entityId as string | undefined;
+  if (!kind || !id) return null;
+  const paths: Record<string, string> = {
+    deal: `/dashboard/crm/deals/${id}`,
+    lead: `/dashboard/crm/leads/${id}`,
+    activity: `/dashboard/crm/activities`,
+  };
+  return paths[kind] ?? null;
+}
+
 export function NotificationBell() {
+  const router = useRouter();
   const {
     items,
     unreadCount,
@@ -36,11 +51,15 @@ export function NotificationBell() {
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className='w-80 p-0'
+        className='flex w-80 flex-col p-0
+          max-h-[min(480px,calc(var(--radix-popover-content-available-height)-16px))]'
         align='end'
         sideOffset={8}
+        avoidCollisions
+        collisionPadding={12}
       >
-        <div className='flex items-center justify-between border-b px-4 py-3'>
+        {/* Fixed header */}
+        <div className='flex shrink-0 items-center justify-between border-b px-4 py-3'>
           <h4 className='text-sm font-semibold'>Notifications</h4>
           {unreadCount > 0 && (
             <Button
@@ -54,7 +73,9 @@ export function NotificationBell() {
             </Button>
           )}
         </div>
-        <ScrollArea className='max-h-80'>
+
+        {/* Scrollable list — takes remaining height */}
+        <div className='min-h-0 flex-1 overflow-y-auto'>
           {isLoading ? (
             <div className='py-8 text-center text-sm text-muted-foreground'>
               Loading...
@@ -73,9 +94,9 @@ export function NotificationBell() {
                     !notification.readAt && 'bg-muted/30'
                   )}
                   onClick={() => {
-                    if (!notification.readAt) {
-                      markAsRead(notification.id);
-                    }
+                    if (!notification.readAt) markAsRead(notification.id);
+                    const path = buildEntityPath(notification.data);
+                    if (path) router.push(path);
                   }}
                 >
                   <div className='flex items-start justify-between gap-2'>
@@ -106,7 +127,17 @@ export function NotificationBell() {
               )}
             </div>
           )}
-        </ScrollArea>
+        </div>
+
+        {/* Fixed footer — link to full notifications page */}
+        <div className='shrink-0 border-t'>
+          <button
+            className='w-full py-2.5 text-center text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors'
+            onClick={() => router.push('/dashboard/notifications')}
+          >
+            View all notifications
+          </button>
+        </div>
       </PopoverContent>
     </Popover>
   );

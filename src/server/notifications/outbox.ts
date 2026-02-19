@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { NotificationEventType, type OutboxEventInput } from './types';
 
 /**
@@ -36,18 +37,32 @@ export async function publishOutboxEvent(tx: TxClient, input: OutboxEventInput):
     input.sourceEventId ??
     makeSourceEventId(input.type, input.entityId, Date.now().toString());
 
-  const event = await tx.outboxEvent.create({
-    data: {
-      tenantId: input.tenantId,
-      sourceEventId,
-      type: input.type,
-      actorUserId: input.actorUserId,
-      entityKind: input.entityKind,
-      entityId: input.entityId,
-      payload: input.payload,
-    },
-    select: { id: true },
-  });
-
-  return event.id;
+  try {
+    const event = await tx.outboxEvent.create({
+      data: {
+        tenantId: input.tenantId,
+        sourceEventId,
+        type: input.type,
+        actorUserId: input.actorUserId,
+        entityKind: input.entityKind,
+        entityId: input.entityId,
+        payload: input.payload,
+      },
+      select: { id: true },
+    });
+    return event.id;
+  } catch (err) {
+    // P2002: unique constraint on (tenantId, sourceEventId) — event already published.
+    // This is idempotency: silently return the existing event id so callers can
+    // still enqueue a BullMQ job (the worker will find the event already PROCESSED
+    // and skip it gracefully).
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      const existing = await tx.outboxEvent.findUnique({
+        where: { tenantId_sourceEventId: { tenantId: input.tenantId, sourceEventId } },
+        select: { id: true },
+      });
+      if (existing) return existing.id;
+    }
+    throw err;
+  }
 }

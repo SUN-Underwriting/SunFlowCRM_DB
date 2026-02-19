@@ -15,7 +15,10 @@ export async function GET(request: NextRequest) {
         unreadOnly: searchParams.get('unreadOnly') ?? undefined,
       });
 
-      const result = await listNotifications(user.tenantId, user.id, query);
+      const typesParam = searchParams.get('types');
+      const types = typesParam ? typesParam.split(',').filter(Boolean) : undefined;
+
+      const result = await listNotifications(user.tenantId, user.id, { ...query, types });
 
       return apiResponse(result);
     });
