@@ -2,11 +2,18 @@ import type { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs';
 
 // Define the base Next.js configuration
+// output: 'standalone' is needed for Docker but must be disabled on Vercel
+// (Vercel builds its own serverless output and ignores/breaks standalone mode)
 const baseConfig: NextConfig = {
-  output: 'standalone',
+  output: process.env.VERCEL ? undefined : 'standalone',
   // BullMQ uses ioredis which must be treated as an external server-side package
   // Prisma client must not be bundled on the client side
-  serverExternalPackages: ['ioredis', 'bullmq', '@prisma/client', '.prisma/client'],
+  serverExternalPackages: [
+    'ioredis',
+    'bullmq',
+    '@prisma/client',
+    '.prisma/client'
+  ],
   images: {
     remotePatterns: [
       {

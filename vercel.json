@@ -1,0 +1,12 @@
+{
+  "framework": "nextjs",
+  "functions": {
+    "src/app/api/notifications/sse/route.ts": {
+      "maxDuration": 300
+    }
+  },
+  "env": {
+    "NEXT_PUBLIC_AUTH_PROVIDER": "stack",
+    "AUTH_PROVIDER": "stack"
+  }
+}
