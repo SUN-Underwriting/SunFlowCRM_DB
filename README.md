@@ -183,7 +183,7 @@ SunFlowCRM/
 
 2. **Setup Environment**
    ```bash
-   cp .env.example .env.local
+   cp env.example.txt .env
    # Key variables: DATABASE_URL, REDIS_URL, INTERNAL_WORKER_SECRET
    ```
 
@@ -522,7 +522,7 @@ Currently no automated tests in main repo. Testing guidance:
 # 1. Install and configure
 git clone https://github.com/your-org/SunFlowCRM.git && cd SunFlowCRM
 npm install
-cp .env.example .env.local
+cp env.example.txt .env
 npx prisma migrate dev
 
 # 2. Start with SuperTokens (Terminal 1)
@@ -535,17 +535,86 @@ npm run dev:stack
 npm run worker:notifications
 ```
 
+---
+
+### Production: Docker Compose
+
+The simplest self-hosted production deployment uses `docker-compose.prod.yml`,
+which runs the Next.js application together with PostgreSQL, Redis, and SuperTokens
+in containers.
+
+#### Prerequisites
+
+- Docker 24+ and Docker Compose v2+
+- A machine with at least 2 GB RAM
+
+#### Steps
+
+**1. Build the application image**
+
+```bash
+docker build -t sunflow-app:latest .
+```
+
+**2. Create the production environment file**
+
+```bash
+cp env.example.txt .env.prod
+# Edit .env.prod and fill in all required values (see comments inside)
+```
+
+At minimum you must set:
+
+| Variable | Description |
+|---|---|
+| `POSTGRES_PASSWORD` | Strong password for PostgreSQL |
+| `REDIS_PASSWORD` | Strong password for Redis (required) |
+| `SUPERTOKENS_API_KEY` | Generate with: `openssl rand -hex 32` |
+| `INTERNAL_WORKER_SECRET` | Generate with: `openssl rand -hex 32` |
+| `NEXT_PUBLIC_APP_URL` | Public URL of the app, e.g. `https://crm.example.com` |
+
+**3. Start the stack**
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+```
+
+This will:
+- Start PostgreSQL and Redis
+- Start the SuperTokens auth server
+- Run Prisma migrations automatically (`migrate` service)
+- Start the Next.js app on port 3000 (or `APP_PORT`)
+- Start the notifications background worker
+
+**4. Verify**
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+# All services should show "healthy" or "running"
+```
+
+**5. (Optional) Reverse proxy / HTTPS**
+
+Place an Nginx or Caddy reverse proxy in front of port 3000 to terminate TLS.
+Example Caddyfile:
+
+```
+crm.example.com {
+    reverse_proxy localhost:3000
+}
+```
+
+---
+
 ### Production Checklist
-- [ ] Set production environment variables
-- [ ] Use strong `SUPERTOKENS_API_KEY` and `INTERNAL_WORKER_SECRET`
-- [ ] Configure PostgreSQL backups
-- [ ] Set up Redis persistence
-- [ ] Enable HTTPS/SSL
-- [ ] Configure Sentry for error tracking
-- [ ] Run migrations: `npx prisma migrate deploy`
-- [ ] Build application: `npm run build`
-- [ ] Start server: `npm start`
-- [ ] Run notifications worker separately
+
+- [ ] Set strong `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `SUPERTOKENS_API_KEY`, and `INTERNAL_WORKER_SECRET`
+- [ ] Set `NEXT_PUBLIC_APP_URL` to your public domain
+- [ ] Enable HTTPS/SSL via a reverse proxy (Nginx, Caddy, Traefik)
+- [ ] Configure PostgreSQL backups (e.g. `pg_dump` cron or managed DB)
+- [ ] Set up Redis persistence (`appendonly yes` in redis config)
+- [ ] Configure Sentry for error tracking (set `NEXT_PUBLIC_SENTRY_DSN`)
+- [ ] Set `NEXT_PUBLIC_SENTRY_DISABLED=false` in production
 
 ---
 
