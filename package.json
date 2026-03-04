@@ -4,6 +4,7 @@
   "private": true,
   "author": "SunApp AG",
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --hostname localhost",
     "dev:supertokens": "bash scripts/dev-supertokens.sh",
     "dev:stack": "bash scripts/dev-stack.sh",

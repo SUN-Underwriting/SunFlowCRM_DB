@@ -4,11 +4,9 @@ import { withSentryConfig } from '@sentry/nextjs';
 // Define the base Next.js configuration
 const baseConfig: NextConfig = {
   output: 'standalone',
-  turbopack: {
-    root: __dirname
-  },
   // BullMQ uses ioredis which must be treated as an external server-side package
-  serverExternalPackages: ['ioredis', 'bullmq'],
+  // Prisma client must not be bundled on the client side
+  serverExternalPackages: ['ioredis', 'bullmq', '@prisma/client', '.prisma/client'],
   images: {
     remotePatterns: [
       {
