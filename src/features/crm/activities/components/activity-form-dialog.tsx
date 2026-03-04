@@ -153,7 +153,7 @@ export function ActivityFormDialog({
   const [organizations, setOrgs]      = useState<{ id: string; name: string }[]>([]);
   const [loadingRelated, setLoadingRelated] = useState(false);
 
-  const subjectRef = useRef<HTMLInputElement>(null);
+  const subjectRef = useRef<HTMLInputElement | null>(null);
 
   const createActivity = useCreateActivity();
   const updateActivity = useUpdateActivity();
@@ -342,7 +342,6 @@ export function ActivityFormDialog({
                     <FormItem>
                       <FormControl>
                         <input
-                          ref={subjectRef}
                           placeholder='Subject…'
                           className={cn(
                             'w-full bg-transparent text-lg font-medium placeholder:text-muted-foreground/50',
@@ -350,6 +349,10 @@ export function ActivityFormDialog({
                             'py-1 leading-snug'
                           )}
                           {...field}
+                          ref={(el) => {
+                            field.ref(el);
+                            subjectRef.current = el;
+                          }}
                         />
                       </FormControl>
                       <FormMessage className='text-xs' />
