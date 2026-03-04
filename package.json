@@ -7,6 +7,7 @@
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --hostname localhost",
     "dev:supertokens": "bash scripts/dev-supertokens.sh",
     "dev:stack": "bash scripts/dev-stack.sh",
+    "postinstall": "prisma generate",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
