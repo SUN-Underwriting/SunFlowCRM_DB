@@ -1,14 +1,17 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   IconShip,
   IconCalculator,
   IconChevronRight,
   IconChevronLeft,
   IconCheck,
-  IconAlertTriangle
+  IconAlertTriangle,
+  IconDeviceFloppy
 } from '@tabler/icons-react';
+import { toast } from 'sonner';
 import { calculateYachtPremium } from '@/features/underwriting/rating/engine';
 import type { RiskInput } from '@/features/underwriting/rating/types';
 
@@ -111,11 +114,15 @@ function Toggle({
 }
 
 export default function NewQuotePage() {
+  const router = useRouter();
   const [step, setStep] = useState(0);
   const [result, setResult] = useState<ReturnType<
     typeof calculateYachtPremium
   > | null>(null);
+  const [saving, setSaving] = useState(false);
   const [vesselName, setVesselName] = useState('');
+  const [brokerName, setBrokerName] = useState('');
+  const [brokerEmail, setBrokerEmail] = useState('');
 
   const [form, setForm] = useState<Partial<RiskInput>>({
     territory: 'ROW',
@@ -140,6 +147,72 @@ export default function NewQuotePage() {
 
   function set(key: keyof RiskInput, value: unknown) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      let res: Response;
+      const payload = {
+        hullValue: Number(form.hullValue) || 0,
+        vesselType: form.vesselType || 'MOTOR',
+        yearBuilt: Number(form.yearBuilt) || 2010,
+        lengthFeet: Number(form.lengthFeet) || 40,
+        territory: form.territory || 'ROW',
+        useType: form.useType || 'PRIVATE',
+        navAreaModifier: form.navAreaModifier ?? null,
+        liabilityLimit: Number(form.liabilityLimit) || 1_000_000,
+        hullDeductiblePct: Number(form.hullDeductiblePct) || 0.02,
+        englishLaw: form.englishLaw ?? true,
+        includeWindstorm: form.includeWindstorm ?? false,
+        hasAutoFireExt: form.hasAutoFireExt ?? false,
+        professionalCrew: form.professionalCrew ?? false,
+        hasYachtingQual: form.hasYachtingQual ?? false,
+        dieselOnly: form.dieselOnly ?? false,
+        inlandWatersOnly: form.inlandWatersOnly ?? false,
+        faultClaimsCY: Number(form.faultClaimsCY) || 0,
+        faultClaimsPY: Number(form.faultClaimsPY) || 0,
+        faultClaims2Y: Number(form.faultClaims2Y) || 0,
+        faultClaims3Y: Number(form.faultClaims3Y) || 0,
+        noFaultClaims: Number(form.noFaultClaims) || 0,
+        layUpMonths: Number(form.layUpMonths) || 0,
+        transits: [],
+        maxSpeedKnots: form.maxSpeedKnots
+          ? Number(form.maxSpeedKnots)
+          : undefined,
+        vesselName,
+        brokerName,
+        brokerEmail
+      };
+      try {
+        res = await fetch('/api/underwriting/calculate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json?.error ?? `HTTP ${res.status}`);
+      }
+      toast.success('Quote saved! Redirecting to submissions...');
+      router.push('/dashboard/underwriting/submissions');
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        toast.error('Request timed out — check the server logs');
+      } else {
+        toast.error(
+          err instanceof Error ? err.message : 'Failed to save quote'
+        );
+      }
+    } finally {
+      setSaving(false);
+    }
   }
 
   function calculate() {
@@ -297,6 +370,21 @@ export default function NewQuotePage() {
                   />
                 </Field>
               )}
+              <Field label='Broker Name'>
+                <Input
+                  placeholder='John Smith'
+                  value={brokerName}
+                  onChange={(e) => setBrokerName(e.target.value)}
+                />
+              </Field>
+              <Field label='Broker Email'>
+                <Input
+                  type='email'
+                  placeholder='broker@example.com'
+                  value={brokerEmail}
+                  onChange={(e) => setBrokerEmail(e.target.value)}
+                />
+              </Field>
             </div>
           </div>
         )}
@@ -668,15 +756,25 @@ export default function NewQuotePage() {
           )}
 
           {step === 3 && (
-            <button
-              onClick={() => {
-                setStep(0);
-                setResult(null);
-              }}
-              className='hover:bg-accent flex items-center gap-2 rounded-lg border px-4 py-2 text-sm'
-            >
-              New Quote
-            </button>
+            <div className='flex gap-3'>
+              <button
+                onClick={() => {
+                  setStep(0);
+                  setResult(null);
+                }}
+                className='hover:bg-accent flex items-center gap-2 rounded-lg border px-4 py-2 text-sm'
+              >
+                New Quote
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className='flex items-center gap-2 rounded-lg bg-green-600 px-5 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60'
+              >
+                <IconDeviceFloppy className='h-4 w-4' />
+                {saving ? 'Saving...' : 'Save & Issue Quote'}
+              </button>
+            </div>
           )}
         </div>
       </div>
