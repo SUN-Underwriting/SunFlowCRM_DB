@@ -1,9 +1,16 @@
 /**
  * engine.ts — Yacht Insurance Rating Engine
- * Implements Facility Agreement LM21M0136, Appendix 6
+ * Facility: LM21M0136, Appendix 6 + Appendix 7
  *
- * Design: Pure functions, no DB calls, Decimal-safe arithmetic.
- * All monetary values stored as cents-precision via Math.round.
+ * Changelog (facility audit fixes):
+ * - MIN_PREMIUM: 250 → 350 (Appendix 7)
+ * - AUS_NZ: discount removed → auto-DECLINE (Appendix 7)
+ * - CUBA/COLOMBIA/HAITI/VENEZUELA nav area → +10% loading (Appendix 6)
+ * - Added: hasExperience3Years (-10%), singleHanded (+10%),
+ *          isKevlarMetal (+10%), racingRally (+20%),
+ *          includeLightningStrike (+10%)
+ * - Survey blocker: vessels >15y without surveyDate → cannot bind
+ * - autoDecline field on RatingResult for hard stops
  */
 
 import type {
@@ -18,8 +25,8 @@ import type {
 // ============================================================
 
 const CURRENT_YEAR = new Date().getFullYear();
-const MIN_PREMIUM = 250; // USD/EUR
-const MAX_NET_DISCOUNT = -0.6; // -60% cap
+const MIN_PREMIUM = 350; // USD — Appendix 7 (was 250, corrected)
+const MAX_NET_DISCOUNT = -0.6; // -60% cap — Appendix 6
 
 // Hull rate bands — US/CA/MX/Caribbean
 const HULL_RATES_US: [number, number, number][] = [
@@ -136,6 +143,13 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+function getSurveyAge(surveyDate: string | undefined): number | null {
+  if (!surveyDate) return null;
+  const survey = new Date(surveyDate);
+  if (isNaN(survey.getTime())) return null;
+  return (Date.now() - survey.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+}
+
 // ============================================================
 // MAIN RATING FUNCTION
 // ============================================================
@@ -158,13 +172,19 @@ export function calculateYachtPremium(input: RiskInput): RatingResult {
     includeTrailer = false,
     trailerValue,
     includeWindstorm = false,
+    includeLightningStrike = false,
     hullDeductiblePct = 0.02,
     hasAutoFireExt = false,
     professionalCrew = false,
     hasYachtingQual = false,
+    hasExperience3Years = false,
     dieselOnly = false,
     englishLaw = true,
     inlandWatersOnly = false,
+    singleHanded = false,
+    isKevlarMetal = false,
+    racingRally = false,
+    surveyDate,
     faultClaimsCY = 0,
     faultClaimsPY = 0,
     faultClaims2Y = 0,
@@ -178,22 +198,75 @@ export function calculateYachtPremium(input: RiskInput): RatingResult {
   const uwFlags: string[] = [];
   const discounts: AppliedFactor[] = [];
   const loadings: AppliedFactor[] = [];
+  let autoDecline: string | undefined;
 
-  // ── UW FLAGS (warnings, not automatic declines) ──────────
+  // ── AUTO-DECLINE CHECKS ──────────────────────────────────────────────────
+
+  // Australia/NZ — declined per Appendix 7
+  if (navAreaModifier === 'AUS_NZ') {
+    autoDecline =
+      'Australian risks are declined — requires personal lines wording (Appendix 7)';
+  }
+
+  // ── UW FLAGS (warnings, not auto-declines) ───────────────────────────────
+
+  if (hullValue > 2_500_000) {
+    uwFlags.push(
+      `Hull value $${hullValue.toLocaleString()} exceeds facility automatic limit ($2,500,000) — Sun UW discretionary acceptance, refer to capacity provider`
+    );
+  }
   if (vesselAge > 25)
     uwFlags.push('Vessel >25 years — out-of-water survey mandatory');
   else if (vesselAge > 15)
-    uwFlags.push('Vessel >15 years — recent survey required');
-  if (hullValue > 6_000_000)
     uwFlags.push(
-      'Hull value exceeds new treaty maximum ($6M) — refer to capacity provider'
+      'Vessel >15 years — survey required (in-water or out-of-water, max 5 years old)'
     );
-  if (maxSpeedKnots && maxSpeedKnots > 65)
-    uwFlags.push('Speed >65 knots — refer to UW, outside automatic capacity');
-  if (faultClaimsCY + faultClaimsPY > 1)
-    uwFlags.push('Multiple fault claims current/prior year — senior UW review');
-  if (navAreaModifier === null && territory === 'US_CA_MX_CARIB') {
-    // Check for excluded territories
+
+  if (vesselAge > 15) {
+    const surveyAgeYears = getSurveyAge(surveyDate);
+    if (!surveyDate) {
+      uwFlags.push(
+        '⚠️ CANNOT BIND: Survey date not provided — required for vessels over 15 years (Appendix 7)'
+      );
+    } else if (surveyAgeYears !== null && surveyAgeYears > 5) {
+      uwFlags.push(
+        `⚠️ CANNOT BIND: Survey is ${surveyAgeYears.toFixed(1)} years old — maximum 5 years accepted (Appendix 7)`
+      );
+    }
+  }
+
+  if (vesselType === 'TRIMARAN') {
+    uwFlags.push(
+      'Trimaran — up-to-date survey and high deductible required (Appendix 7)'
+    );
+  }
+
+  if (maxSpeedKnots && maxSpeedKnots > 65) {
+    uwFlags.push('Speed >65 knots — outside automatic capacity, refer to UW');
+  }
+
+  if (faultClaimsCY + faultClaimsPY > 1) {
+    uwFlags.push(
+      'Multiple fault claims current/prior year — senior UW review required'
+    );
+  }
+
+  if (navAreaModifier === 'CUBA_COL_HAITI_VEN') {
+    uwFlags.push(
+      'Navigation in Cuba/Colombia/Haiti/Venezuela — +10% loading applied'
+    );
+  }
+
+  if (racingRally) {
+    uwFlags.push(
+      'Racing/Rally use — +20% loading applied, confirm race wording'
+    );
+  }
+
+  if (transits.length > 0 && vesselType === 'SAILING' && vesselAge > 10) {
+    uwFlags.push(
+      'Sailing vessel >10 years with ocean transit — rigging inspection report required prior to voyage (Appendix 7)'
+    );
   }
 
   // ── BASE HULL RATE ────────────────────────────────────────
@@ -259,12 +332,6 @@ export function calculateYachtPremium(input: RiskInput): RatingResult {
       label: 'Mediterranean / European Waters',
       pct: -30
     });
-  } else if (navAreaModifier === 'AUS_NZ') {
-    discounts.push({
-      code: 'AUS_NZ',
-      label: 'Australia / New Zealand',
-      pct: -30
-    });
   } else if (navAreaModifier === 'WEST_COAST_US_MX') {
     discounts.push({
       code: 'WEST_COAST_US_MX',
@@ -283,7 +350,15 @@ export function calculateYachtPremium(input: RiskInput): RatingResult {
       label: 'Chesapeake Bay Seasonal',
       pct: -25
     });
+  } else if (navAreaModifier === 'CUBA_COL_HAITI_VEN') {
+    // +10% loading — Appendix 6
+    loadings.push({
+      code: 'CUBA_COL_HAITI_VEN',
+      label: 'Cuba / Colombia / Haiti / Venezuela',
+      pct: 10
+    });
   }
+  // AUS_NZ: no discount — auto-decline handled above
 
   // ── VESSEL FEATURES ───────────────────────────────────────
   if (hasAutoFireExt) {
@@ -304,6 +379,14 @@ export function calculateYachtPremium(input: RiskInput): RatingResult {
     discounts.push({
       code: 'YACHTING_QUALIFICATION',
       label: 'Yachting Qualification',
+      pct: -10
+    });
+  }
+  if (hasExperience3Years) {
+    // Appendix 6 — "3 YEARS EXPERIENCE 10%"
+    discounts.push({
+      code: 'EXPERIENCE_3Y',
+      label: '3 Years Boating Experience',
       pct: -10
     });
   }
@@ -333,6 +416,40 @@ export function calculateYachtPremium(input: RiskInput): RatingResult {
       code: 'EXCL_WINDSTORM_BOX',
       label: 'Windstorm Box Excluded',
       pct: -10
+    });
+  }
+
+  // ── VESSEL FEATURES — LOADINGS ────────────────────────────────
+  if (singleHanded) {
+    // Appendix 6 — "SINGLE HANDED 10%"
+    loadings.push({
+      code: 'SINGLE_HANDED',
+      label: 'Single-Handed Operation',
+      pct: 10
+    });
+  }
+  if (isKevlarMetal) {
+    // Appendix 6 — "KEVLER / METALHULL 10%"
+    loadings.push({
+      code: 'KEVLAR_METAL',
+      label: 'Kevlar / Metal Hull Construction',
+      pct: 10
+    });
+  }
+  if (racingRally) {
+    // Appendix 6 — "RACING / RALLY 20%"
+    loadings.push({
+      code: 'RACING_RALLY',
+      label: 'Racing / Rally Use',
+      pct: 20
+    });
+  }
+  if (includeLightningStrike) {
+    // Appendix 6 — "INCLUDE LIGHTNING STRIKE 10%"
+    loadings.push({
+      code: 'LIGHTNING_STRIKE',
+      label: 'Lightning Strike Cover Included',
+      pct: 10
     });
   }
 
@@ -525,6 +642,7 @@ export function calculateYachtPremium(input: RiskInput): RatingResult {
     },
     minimumPremiumApplied,
     vesselAge,
-    uwFlags
+    uwFlags,
+    autoDecline
   };
 }
