@@ -19,7 +19,8 @@ import {
   IconShield,
   IconMessage,
   IconActivity,
-  IconChartBar
+  IconChartBar,
+  IconDownload
 } from '@tabler/icons-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -239,6 +240,7 @@ export default function SubmissionDetailPage() {
   const [uwNotes, setUwNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   const id = params?.id as string;
 
@@ -313,6 +315,28 @@ export default function SubmissionDetailPage() {
     }
   }
 
+  async function downloadSlip() {
+    setDownloading(true);
+    try {
+      const res = await fetch(`/api/underwriting/submissions/${id}/slip`);
+      if (!res.ok) throw new Error('Failed to generate slip');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `QuoteSlip_${sub!.reference}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Quote slip downloaded');
+    } catch {
+      toast.error('Failed to download slip');
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className='flex h-96 items-center justify-center'>
@@ -375,6 +399,16 @@ export default function SubmissionDetailPage() {
 
         {/* Action buttons */}
         <div className='flex items-center gap-2'>
+          {quote && (
+            <button
+              onClick={downloadSlip}
+              disabled={downloading}
+              className='flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-zinc-700 disabled:opacity-50'
+            >
+              <IconDownload className='h-4 w-4' />
+              {downloading ? 'Generating…' : 'Quote Slip'}
+            </button>
+          )}
           {canReview && (
             <button
               onClick={() => updateStatus('REVIEW')}
