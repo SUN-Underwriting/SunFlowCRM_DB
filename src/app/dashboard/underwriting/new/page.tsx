@@ -287,9 +287,7 @@ export default function NewQuotePage() {
           </div>
           <div>
             <h2 className='text-2xl font-bold'>New Quote</h2>
-            <p className='text-muted-foreground text-sm'>
-              Marine Yacht — LM21M0136
-            </p>
+            <p className='text-muted-foreground text-sm'>Sun Re Marine</p>
           </div>
         </div>
 

@@ -96,7 +96,7 @@ export default function UnderwritingPage() {
           <div>
             <h2 className='text-3xl font-bold tracking-tight'>Underwriting</h2>
             <p className='text-muted-foreground'>
-              Marine Yacht — Facility LM21M0136
+              Sun Re Marine — Marine Yacht
             </p>
           </div>
         </div>
@@ -175,7 +175,7 @@ export default function UnderwritingPage() {
           <IconShip className='mt-0.5 h-5 w-5 shrink-0 text-blue-400' />
           <div className='space-y-1'>
             <p className='font-semibold text-blue-300'>
-              Facility LM21M0136 — Active
+              Sun Re Marine — Active
             </p>
             <div className='grid gap-x-8 gap-y-1 text-sm text-blue-200/70 sm:grid-cols-3'>
               <span>

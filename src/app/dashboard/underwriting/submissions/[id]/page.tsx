@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { AIAnalysisPanel } from '@/components/underwriting/AIAnalysisPanel';
 import { toast } from 'sonner';
 import {
   IconArrowLeft,
@@ -76,9 +77,13 @@ interface Submission {
   englishLaw?: boolean;
   insuredName?: string;
   brokerName?: string;
+  brokerCompany?: string;
   brokerEmail?: string;
+  navAreaModifier?: string;
   uwNotes?: string;
   uwDecision?: string;
+  aiAnalysis?: Record<string, unknown> | null;
+  aiAnalyzedAt?: string | null;
   createdAt: string;
   quotes: Quote[];
 }
@@ -811,6 +816,13 @@ export default function SubmissionDetailPage() {
               {saving ? 'Saving...' : 'Save Notes'}
             </button>
           </Section>
+
+          {/* AI Analysis */}
+          <AIAnalysisPanel
+            submissionId={sub.id}
+            initialAnalysis={sub.aiAnalysis ? (sub.aiAnalysis as any) : null}
+            initialAnalyzedAt={sub.aiAnalyzedAt ?? null}
+          />
 
           {/* Quote history */}
           {sub.quotes.length > 1 && (
