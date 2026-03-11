@@ -104,7 +104,7 @@ function fmt(val: number | undefined | null, decimals = 0) {
 
 function fmtPct(val: number | undefined | null) {
   if (val == null || isNaN(val)) return '—';
-  return `${(Number(val) * 100).toFixed(3)}%`;
+  return `${Number(val).toFixed(3)}%`;
 }
 
 function fmtDate(iso: string) {
@@ -219,7 +219,7 @@ function AdjustmentRow({
   type: 'discount' | 'loading';
 }) {
   const isDiscount = type === 'discount';
-  const pctDisplay = `${isDiscount ? '-' : '+'}${(Math.abs(Number(item.pct)) * 100).toFixed(1)}%`;
+  const pctDisplay = `${isDiscount ? '-' : '+'}${Math.abs(Number(item.pct)).toFixed(1)}%`;
   return (
     <div className='flex items-center justify-between border-b border-zinc-800 py-1.5 last:border-0'>
       <div>
@@ -683,7 +683,7 @@ export default function SubmissionDetailPage() {
                 className={`text-xl font-semibold tabular-nums ${Number(quote.netAdjustmentPct) < 0 ? 'text-emerald-400' : 'text-amber-400'}`}
               >
                 {Number(quote.netAdjustmentPct) < 0 ? '' : '+'}
-                {(Number(quote.netAdjustmentPct) * 100).toFixed(1)}%
+                {Number(quote.netAdjustmentPct).toFixed(1)}%
               </p>
               <p className='mt-1 text-xs text-zinc-500'>
                 Base: {fmtPct(Number(quote.baseRatePct))}
@@ -791,7 +791,7 @@ export default function SubmissionDetailPage() {
                       className={`text-lg font-semibold tabular-nums ${Number(quote.netAdjustmentPct) <= 0 ? 'text-emerald-400' : 'text-amber-400'}`}
                     >
                       {Number(quote.netAdjustmentPct) < 0 ? '' : '+'}
-                      {(Number(quote.netAdjustmentPct) * 100).toFixed(1)}%
+                      {Number(quote.netAdjustmentPct).toFixed(1)}%
                     </span>
                   </div>
                   <IconChevronRight className='h-4 w-4 text-zinc-600' />

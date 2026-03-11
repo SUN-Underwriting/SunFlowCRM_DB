@@ -44,6 +44,15 @@ export async function POST(request: NextRequest) {
           ? Number(rawInput.trailerValue)
           : undefined,
         navAreaModifier: rawInput.navAreaModifier ?? null,
+        medicalExpensesLimit: rawInput.medicalExpensesLimit
+          ? Number(rawInput.medicalExpensesLimit)
+          : 10_000,
+        uninsuredBoatersLimit: rawInput.uninsuredBoatersLimit
+          ? Number(rawInput.uninsuredBoatersLimit)
+          : 25_000,
+        crewLiabilityLimit: rawInput.crewLiabilityLimit
+          ? Number(rawInput.crewLiabilityLimit)
+          : 0,
         faultClaimsCY: Number(rawInput.faultClaimsCY) || 0,
         faultClaimsPY: Number(rawInput.faultClaimsPY) || 0,
         faultClaims2Y: Number(rawInput.faultClaims2Y) || 0,
@@ -84,6 +93,9 @@ export async function POST(request: NextRequest) {
           trailerValue: riskInput.trailerValue ?? null,
           includeWindstorm: riskInput.includeWindstorm ?? false,
           hullDeductiblePct: riskInput.hullDeductiblePct ?? 0.02,
+          medicalExpensesLimit: riskInput.medicalExpensesLimit ?? 10_000,
+          uninsuredBoatersLimit: riskInput.uninsuredBoatersLimit ?? 25_000,
+          crewLiabilityLimit: riskInput.crewLiabilityLimit ?? 0,
           hasAutoFireExt: riskInput.hasAutoFireExt ?? false,
           professionalCrew: riskInput.professionalCrew ?? false,
           hasYachtingQual: riskInput.hasYachtingQual ?? false,

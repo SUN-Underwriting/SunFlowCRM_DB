@@ -87,6 +87,46 @@ const TRANSIT_RATES: Record<string, Record<string, number>> = {
   PANAMA: { ONE_WAY: 0.0007, ROUND_TRIP: 0.0011 }
 };
 
+// Medical Expenses flat premiums (above $10K included in hull rate)
+// limit → additional premium
+const MEDICAL_EXPENSES_PREMIUMS: Record<number, number> = {
+  10_000: 0, // included in hull rate
+  25_000: 25,
+  50_000: 50,
+  100_000: 75
+};
+
+// Uninsured Boaters flat premiums (up to $25K included in hull rate)
+const UNINSURED_BOATERS_PREMIUMS: Record<number, number> = {
+  25_000: 0, // included in hull rate
+  100_000: 50
+};
+
+// Crew Liability flat premiums by [useType][limit]
+const CREW_LIABILITY_PREMIUMS: Record<string, Record<number, number>> = {
+  PRIVATE: {
+    300_000: 350,
+    500_000: 425,
+    1_000_000: 600,
+    2_000_000: 850,
+    3_000_000: 1_100
+  },
+  CHARTER: {
+    300_000: 450,
+    500_000: 550,
+    1_000_000: 800,
+    2_000_000: 1_050,
+    3_000_000: 1_400
+  },
+  BAREBOAT: {
+    300_000: 450,
+    500_000: 550,
+    1_000_000: 800,
+    2_000_000: 1_050,
+    3_000_000: 1_400
+  }
+};
+
 // ============================================================
 // HELPER FUNCTIONS
 // ============================================================
@@ -191,7 +231,10 @@ export function calculateYachtPremium(input: RiskInput): RatingResult {
     faultClaims3Y = 0,
     noFaultClaims = 0,
     transits = [],
-    layUpMonths = 0
+    layUpMonths = 0,
+    medicalExpensesLimit = 10_000,
+    uninsuredBoatersLimit = 25_000,
+    crewLiabilityLimit = 0
   } = input;
 
   const vesselAge = CURRENT_YEAR - yearBuilt;
@@ -609,7 +652,13 @@ export function calculateYachtPremium(input: RiskInput): RatingResult {
     electronics: electronicsPremium,
     towing: towingPremium,
     trailer: trailerPremium,
-    transits: round2(transitPremium)
+    transits: round2(transitPremium),
+    medicalExpenses: MEDICAL_EXPENSES_PREMIUMS[medicalExpensesLimit] ?? 0,
+    uninsuredBoaters: UNINSURED_BOATERS_PREMIUMS[uninsuredBoatersLimit] ?? 0,
+    crewLiability:
+      crewLiabilityLimit > 0
+        ? (CREW_LIABILITY_PREMIUMS[useType]?.[crewLiabilityLimit] ?? 0)
+        : 0
   };
 
   // ── TOTAL PREMIUM ─────────────────────────────────────────

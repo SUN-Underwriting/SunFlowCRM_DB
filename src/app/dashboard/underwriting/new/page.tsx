@@ -154,7 +154,10 @@ export default function NewQuotePage() {
     faultClaims3Y: 0,
     noFaultClaims: 0,
     layUpMonths: 0,
-    liabilityLimit: 1_000_000
+    liabilityLimit: 1_000_000,
+    medicalExpensesLimit: 10_000,
+    uninsuredBoatersLimit: 25_000,
+    crewLiabilityLimit: 0
   });
 
   function set(key: keyof RiskInput, value: unknown) {
@@ -266,7 +269,12 @@ export default function NewQuotePage() {
       noFaultClaims: Number(form.noFaultClaims) || 0,
       layUpMonths: Number(form.layUpMonths) || 0,
       transits: [],
-      maxSpeedKnots: form.maxSpeedKnots ? Number(form.maxSpeedKnots) : undefined
+      maxSpeedKnots: form.maxSpeedKnots
+        ? Number(form.maxSpeedKnots)
+        : undefined,
+      medicalExpensesLimit: Number(form.medicalExpensesLimit) ?? 10_000,
+      uninsuredBoatersLimit: Number(form.uninsuredBoatersLimit) ?? 25_000,
+      crewLiabilityLimit: Number(form.crewLiabilityLimit) ?? 0
     };
     setResult(calculateYachtPremium(input));
     setStep(3);
@@ -526,6 +534,51 @@ export default function NewQuotePage() {
                       {m} month{m !== 1 ? 's' : ''}
                     </option>
                   ))}
+                </Select>
+              </Field>
+              <Field
+                label='Medical Expenses'
+                hint='Up to $10K included in hull rate'
+              >
+                <Select
+                  value={form.medicalExpensesLimit}
+                  onChange={(e) =>
+                    set('medicalExpensesLimit', Number(e.target.value))
+                  }
+                >
+                  <option value={10_000}>Up to $10,000 (included)</option>
+                  <option value={25_000}>Up to $25,000 (+$25)</option>
+                  <option value={50_000}>Up to $50,000 (+$50)</option>
+                  <option value={100_000}>Up to $100,000 (+$75)</option>
+                </Select>
+              </Field>
+              <Field
+                label='Uninsured Boaters'
+                hint='Up to $25K included in hull rate'
+              >
+                <Select
+                  value={form.uninsuredBoatersLimit}
+                  onChange={(e) =>
+                    set('uninsuredBoatersLimit', Number(e.target.value))
+                  }
+                >
+                  <option value={25_000}>Up to $25,000 (included)</option>
+                  <option value={100_000}>Up to $100,000 (+$50)</option>
+                </Select>
+              </Field>
+              <Field label='Crew Liability'>
+                <Select
+                  value={form.crewLiabilityLimit}
+                  onChange={(e) =>
+                    set('crewLiabilityLimit', Number(e.target.value))
+                  }
+                >
+                  <option value={0}>Not included</option>
+                  <option value={300_000}>$300,000</option>
+                  <option value={500_000}>$500,000</option>
+                  <option value={1_000_000}>$1,000,000</option>
+                  <option value={2_000_000}>$2,000,000</option>
+                  <option value={3_000_000}>$3,000,000</option>
                 </Select>
               </Field>
             </div>

@@ -181,6 +181,13 @@ function buildPolicy(sub: any, quote: any): Document {
     boundQuote?.discountsApplied ?? [];
   const loadings: Array<{ label: string; pct: number }> =
     boundQuote?.loadingsApplied ?? [];
+  const optPremiums = (boundQuote?.optionalPremiums ?? {}) as Record<
+    string,
+    number
+  >;
+  const medicalPremium = Number(optPremiums.medicalExpenses ?? 0);
+  const uninsuredPremium = Number(optPremiums.uninsuredBoaters ?? 0);
+  const crewPremium = Number(optPremiums.crewLiability ?? 0);
 
   return new Document({
     styles: {
@@ -411,8 +418,35 @@ function buildPolicy(sub: any, quote: any): Document {
                   ? ` (${(Number(boundQuote.hullDeductiblePct) * 100).toFixed(0)}%)`
                   : '')
             ),
-            row2('Third Party Liability', fmtUSD(sub.liabilityLimit)),
-            row2('P&I Deductible', fmtUSD(boundQuote?.liabilityDed))
+            row2(
+              'Third Party Liability / Pollution',
+              fmtUSD(sub.liabilityLimit)
+            ),
+            row2('P&I Deductible', fmtUSD(boundQuote?.liabilityDed)),
+            ...(sub.medicalExpensesLimit > 10_000
+              ? [
+                  row2(
+                    'Medical Expenses',
+                    `$${Number(sub.medicalExpensesLimit).toLocaleString()}`
+                  )
+                ]
+              : []),
+            ...(sub.uninsuredBoatersLimit > 25_000
+              ? [
+                  row2(
+                    'Uninsured Boaters',
+                    `$${Number(sub.uninsuredBoatersLimit).toLocaleString()}`
+                  )
+                ]
+              : []),
+            ...(sub.crewLiabilityLimit > 0
+              ? [
+                  row2(
+                    'Crew Liability',
+                    `$${Number(sub.crewLiabilityLimit).toLocaleString()}`
+                  )
+                ]
+              : [])
           ]),
 
           spacer(),
@@ -424,7 +458,19 @@ function buildPolicy(sub: any, quote: any): Document {
             rows: [
               sectionHeader('PREMIUM'),
               row2('Hull Premium', fmtUSD(boundQuote?.hullPremium)),
-              row2('P&I Premium', fmtUSD(boundQuote?.liabilityPremium)),
+              row2(
+                'P&I / Pollution Premium',
+                fmtUSD(boundQuote?.liabilityPremium)
+              ),
+              ...(medicalPremium > 0
+                ? [row2('Medical Expenses', fmtUSD(medicalPremium))]
+                : []),
+              ...(uninsuredPremium > 0
+                ? [row2('Uninsured Boaters', fmtUSD(uninsuredPremium))]
+                : []),
+              ...(crewPremium > 0
+                ? [row2('Crew Liability', fmtUSD(crewPremium))]
+                : []),
               new TableRow({
                 children: [
                   cell('TOTAL ANNUAL PREMIUM', {
@@ -455,21 +501,15 @@ function buildPolicy(sub: any, quote: any): Document {
                 table2col([
                   sectionHeader('RATING ADJUSTMENTS'),
                   ...discounts.map((d) =>
-                    row2(
-                      `Discount — ${d.label}`,
-                      `${(d.pct * 100).toFixed(1)}%`
-                    )
+                    row2(`Discount — ${d.label}`, `${d.pct.toFixed(1)}%`)
                   ),
                   ...loadings.map((l) =>
-                    row2(
-                      `Loading — ${l.label}`,
-                      `+${(l.pct * 100).toFixed(1)}%`
-                    )
+                    row2(`Loading — ${l.label}`, `+${l.pct.toFixed(1)}%`)
                   ),
                   row2(
                     'Net Adjustment',
                     boundQuote
-                      ? `${(Number(boundQuote.netAdjustmentPct) * 100).toFixed(1)}%`
+                      ? `${Number(boundQuote.netAdjustmentPct).toFixed(1)}%`
                       : '—'
                   )
                 ]),

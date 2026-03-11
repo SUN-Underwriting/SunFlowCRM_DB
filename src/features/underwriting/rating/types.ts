@@ -82,6 +82,11 @@ export interface RiskInput {
   faultClaims3Y?: number;
   noFaultClaims?: number;
 
+  // ── Optional additional covers ────────────────────────────────────────
+  medicalExpensesLimit?: number; // 0=none/included, 25000, 50000, 100000
+  uninsuredBoatersLimit?: number; // 0=none/included, 100000
+  crewLiabilityLimit?: number; // 0=none, 300000, 500000, 1000000, 2000000, 3000000
+
   // ── Other ────────────────────────────────────────────────
   transits?: Transit[];
   layUpMonths?: number;
@@ -100,6 +105,9 @@ export interface OptionalPremiums {
   towing: number;
   trailer: number;
   transits: number;
+  medicalExpenses: number;
+  uninsuredBoaters: number;
+  crewLiability: number;
 }
 
 export interface RatingBreakdown {

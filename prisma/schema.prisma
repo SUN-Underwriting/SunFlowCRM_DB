@@ -989,6 +989,11 @@ model Submission {
   trailerValue     Decimal? @db.Decimal(10, 2)
   includeWindstorm Boolean  @default(false) // false = exclude windstorm box (-10%)
 
+  // Optional additional covers (Facility Appendix 6)
+  medicalExpensesLimit   Int @default(10000)  // 10000=included, 25000, 50000, 100000
+  uninsuredBoatersLimit  Int @default(25000)  // 25000=included, 100000
+  crewLiabilityLimit     Int @default(0)      // 0=none, 300000–3000000
+
   // Deductible
   hullDeductiblePct Decimal @default(0.02) @db.Decimal(4, 3) // 0.01–0.05
 

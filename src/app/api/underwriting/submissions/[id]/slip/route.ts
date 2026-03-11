@@ -185,19 +185,10 @@ function validUntil(createdAt: string): string {
 // ── Document builder ──────────────────────────────────────────
 
 function buildSlip(sub: any, quote: any): Document {
-  const discounts: Array<{ label: string; pct: number }> =
-    quote?.discountsApplied ?? [];
-  const loadings: Array<{ label: string; pct: number }> =
-    quote?.loadingsApplied ?? [];
-  const netAdj = quote
-    ? (Number(quote.netAdjustmentPct) * 100).toFixed(1) + '%'
-    : '—';
-  const baseRate = quote
-    ? (Number(quote.baseRatePct) * 100).toFixed(3) + '%'
-    : '—';
-  const adjRate = quote
-    ? (Number(quote.adjustedRatePct) * 100).toFixed(3) + '%'
-    : '—';
+  const optPremiums = (quote?.optionalPremiums ?? {}) as Record<string, number>;
+  const medicalPremium = Number(optPremiums.medicalExpenses ?? 0);
+  const uninsuredPremium = Number(optPremiums.uninsuredBoaters ?? 0);
+  const crewPremium = Number(optPremiums.crewLiability ?? 0);
 
   const territory =
     sub.territory === 'US_CA_MX_CARIB'
@@ -493,7 +484,29 @@ function buildSlip(sub: any, quote: any): Document {
             rows: [
               sectionHeader('PREMIUM'),
               row2('Hull & Machinery', fmtUSD(quote?.hullPremium)),
-              row2('P&I Liability', fmtUSD(quote?.liabilityPremium)),
+              row2(
+                'P&I / Pollution Liability',
+                fmtUSD(quote?.liabilityPremium)
+              ),
+              ...(medicalPremium > 0
+                ? [
+                    row2(
+                      'Medical Expenses (additional)',
+                      fmtUSD(medicalPremium)
+                    )
+                  ]
+                : []),
+              ...(uninsuredPremium > 0
+                ? [
+                    row2(
+                      'Uninsured Boaters (additional)',
+                      fmtUSD(uninsuredPremium)
+                    )
+                  ]
+                : []),
+              ...(crewPremium > 0
+                ? [row2('Crew Liability', fmtUSD(crewPremium))]
+                : []),
               // Total row — dark background
               new TableRow({
                 children: [
@@ -568,83 +581,29 @@ function buildSlip(sub: any, quote: any): Document {
                 : '—'
             ),
             row2('P&I Deductible', quote ? fmtUSD(quote.liabilityDed) : '—'),
-            row2('P&I Liability Limit', fmtUSD(sub.liabilityLimit))
-          ]),
-
-          spacer(),
-
-          // ── RATING SUMMARY ────────────────────────────────────
-          table2col([
-            sectionHeader('RATING SUMMARY'),
-            row2('Base Hull Rate', baseRate),
-            row2('Net Adjustment', netAdj),
-            row2('Adjusted Rate', adjRate),
-            ...(discounts.length > 0
+            row2('P&I / Pollution Liability Limit', fmtUSD(sub.liabilityLimit)),
+            ...(sub.medicalExpensesLimit > 10_000
               ? [
-                  new TableRow({
-                    children: [
-                      labelCell('Discounts Applied'),
-                      new TableCell({
-                        borders: cellBorders,
-                        width: { size: 5160, type: WidthType.DXA },
-                        shading: { fill: WHITE, type: ShadingType.CLEAR },
-                        margins: {
-                          top: 100,
-                          bottom: 100,
-                          left: 160,
-                          right: 160
-                        },
-                        children: discounts.map(
-                          (d: any) =>
-                            new Paragraph({
-                              children: [
-                                new TextRun({
-                                  text: `${d.label}   ${d.pct}%`,
-                                  size: 18,
-                                  color: TEXT,
-                                  font: 'Arial'
-                                })
-                              ],
-                              spacing: { after: 40 }
-                            })
-                        )
-                      })
-                    ]
-                  })
+                  row2(
+                    'Medical Expenses Limit',
+                    `$${Number(sub.medicalExpensesLimit).toLocaleString()}`
+                  )
                 ]
               : []),
-            ...(loadings.length > 0
+            ...(sub.uninsuredBoatersLimit > 25_000
               ? [
-                  new TableRow({
-                    children: [
-                      labelCell('Loadings Applied'),
-                      new TableCell({
-                        borders: cellBorders,
-                        width: { size: 5160, type: WidthType.DXA },
-                        shading: { fill: WHITE, type: ShadingType.CLEAR },
-                        margins: {
-                          top: 100,
-                          bottom: 100,
-                          left: 160,
-                          right: 160
-                        },
-                        children: loadings.map(
-                          (l: any) =>
-                            new Paragraph({
-                              children: [
-                                new TextRun({
-                                  text: `${l.label}   +${l.pct}%`,
-                                  size: 18,
-                                  color: 'C0392B',
-                                  font: 'Arial'
-                                })
-                              ],
-                              spacing: { after: 40 }
-                            })
-                        )
-                      })
-                    ]
-                  })
+                  row2(
+                    'Uninsured Boaters Limit',
+                    `$${Number(sub.uninsuredBoatersLimit).toLocaleString()}`
+                  )
+                ]
+              : []),
+            ...(sub.crewLiabilityLimit > 0
+              ? [
+                  row2(
+                    'Crew Liability Limit',
+                    `$${Number(sub.crewLiabilityLimit).toLocaleString()}`
+                  )
                 ]
               : [])
           ]),
