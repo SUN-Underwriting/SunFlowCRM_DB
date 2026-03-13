@@ -34,7 +34,7 @@ function buildPrompt(sub: Record<string, unknown>): string {
     ((sub.faultClaims2Y as number) || 0) +
     ((sub.faultClaims3Y as number) || 0);
 
-  return `You are a senior marine yacht underwriter working under Lloyd's facility SUN-MYC-001 (coverholder: London Marine Insurance Services Ltd).
+  return `You are a senior marine yacht underwriter working under Lloyd's facility SUN-MYC-001.
 Facility limits: max hull value USD 6,000,000. Auto-decline for Australian risks. Minimum premium USD 350.
 
 Analyse the following submission and respond ONLY with a JSON object matching this exact structure:
