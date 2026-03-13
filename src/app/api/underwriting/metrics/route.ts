@@ -21,7 +21,11 @@ export async function GET(request: NextRequest) {
           }),
           // Bound policies
           prisma.submission.count({
-            where: { tenantId: user.tenantId, deleted: false, status: 'BOUND' }
+            where: {
+              tenantId: user.tenantId,
+              deleted: false,
+              status: { in: ['BOUND', 'POLICY_ISSUED' as never] }
+            }
           }),
           // Pending review
           prisma.submission.count({

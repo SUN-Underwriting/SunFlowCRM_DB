@@ -98,7 +98,7 @@ export const navItems: NavItem[] = [
   },
   {
     title: 'Underwriting',
-    url: '#',
+    url: '/dashboard/underwriting',
     icon: 'underwriting',
     isActive: false,
     items: [

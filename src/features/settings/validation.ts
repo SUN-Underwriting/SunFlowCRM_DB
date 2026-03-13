@@ -17,9 +17,10 @@ export type InviteUserInput = z.infer<typeof InviteUserSchema>;
 export const UpdateUserSchema = z
   .object({
     role: z.nativeEnum(UserRole).optional(),
-    status: z.nativeEnum(UserStatus).optional()
+    status: z.nativeEnum(UserStatus).optional(),
+    permissions: z.record(z.string(), z.unknown()).optional()
   })
-  .refine((data) => data.role || data.status, {
+  .refine((data) => data.role || data.status || data.permissions, {
     message: 'At least one field is required.',
     path: []
   });

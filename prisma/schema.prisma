@@ -51,6 +51,10 @@ model Tenant {
   // UW Relations
   submissions        Submission[]
   quotes             Quote[]
+  policySequences    PolicySequence[]
+  renewalNotifications RenewalNotification[]
+  endorsements       PolicyEndorsement[]
+  userInvites       UserInvite[]
 
   @@map("tenants")
 }
@@ -110,12 +114,35 @@ model User {
   leadPermittedUsers  LeadPermittedUser[]
   dealPermittedUsers  DealPermittedUser[]
   uwSubmissions       Submission[]        @relation("SubmissionUW") // UW module
+  receivedInvites     UserInvite[]        @relation("InviteeUser")
+  sentInvites         UserInvite[]        @relation("InviteCreator")
 
   @@unique([email, tenantId], name: "user_email_tenant_unique")
   @@index([tenantId])
   @@index([supertokensUserId])
   @@index([stackAuthUserId])
   @@map("users")
+}
+
+model UserInvite {
+  id          String   @id @default(cuid())
+  tenantId    String
+  userId      String
+  email       String
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User   @relation("InviteeUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation("InviteCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, email, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("user_invites")
 }
 
 enum UserRole {
@@ -1026,6 +1053,18 @@ model Submission {
   uwDecision    UWDecision?
   underwriterId String?
 
+  // Policy lifecycle
+  policyNumber             String? @unique // SUN-POL-2026-00001
+  boundAt                  DateTime?
+  policyIssuedAt           DateTime?
+  policyDocumentPath       String?
+  policyDocumentGeneratedAt DateTime?
+
+  // Renewals
+  sourceSubmissionId String?
+  sourceSubmission   Submission? @relation("SubmissionRenewals", fields: [sourceSubmissionId], references: [id], onDelete: SetNull)
+  renewals           Submission[] @relation("SubmissionRenewals")
+
   deleted   Boolean   @default(false)
   deletedAt DateTime?
   createdBy String?
@@ -1037,11 +1076,15 @@ model Submission {
   person       Person?       @relation(fields: [personId], references: [id], onDelete: SetNull)
   underwriter  User?         @relation("SubmissionUW", fields: [underwriterId], references: [id])
   quotes       Quote[]
+  renewalNotifications RenewalNotification[]
+  endorsements PolicyEndorsement[]
 
   @@index([tenantId])
   @@index([tenantId, status])
   @@index([tenantId, deleted])
   @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, policyNumber])
+  @@index([sourceSubmissionId])
   @@index([orgId])
   @@map("submissions")
 }
@@ -1148,6 +1191,61 @@ model RatingFactor {
   @@map("rating_factors")
 }
 
+model PolicySequence {
+  id        String   @id @default(cuid())
+  tenantId  String
+  year      Int
+  lastValue Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, year], name: "policy_seq_tenant_year_unique")
+  @@index([tenantId, year])
+  @@map("policy_sequences")
+}
+
+model RenewalNotification {
+  id           String   @id @default(cuid())
+  tenantId     String
+  submissionId String
+  daysBefore   Int
+  sentAt       DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, daysBefore], name: "renewal_submission_days_unique")
+  @@index([tenantId, daysBefore])
+  @@map("renewal_notifications")
+}
+
+model PolicyEndorsement {
+  id             String            @id @default(cuid())
+  tenantId       String
+  submissionId   String
+  endorsementNo  String            @unique // END-2026-00001
+  type           EndorsementType
+  status         EndorsementStatus @default(PENDING)
+  effectiveDate  DateTime          @db.Date
+  changes        Json              @default("{}")
+  premiumDelta   Decimal?          @db.Decimal(12, 2)
+  notes          String?           @db.Text
+  documentPath   String?
+  createdBy      String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, submissionId, status])
+  @@index([submissionId, createdAt(sort: Desc)])
+  @@map("policy_endorsements")
+}
+
 // ============================================
 // UW ENUMS
 // ============================================
@@ -1158,6 +1256,7 @@ enum SubmissionStatus {
   REVIEW
   QUOTED
   BOUND
+  POLICY_ISSUED
   DECLINED
   EXPIRED
 }
@@ -1202,4 +1301,18 @@ enum FactorCategory {
   DISCOUNT
   LOADING
   TRANSIT
+}
+
+enum EndorsementType {
+  VESSEL_CHANGE
+  NAVIGATION_EXT
+  LAYUP_CHANGE
+  ADDITIONAL_INSURED
+}
+
+enum EndorsementStatus {
+  PENDING
+  APPROVED
+  APPLIED
+  DECLINED
 }

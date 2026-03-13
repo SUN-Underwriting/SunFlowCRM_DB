@@ -24,8 +24,26 @@ import { UserRole, UserStatus } from '@prisma/client';
 
 export const columns = (
   onUpdateRole: (id: string, role: UserRole) => void,
-  onUpdateStatus: (id: string, status: UserStatus) => void
+  onUpdateStatus: (id: string, status: UserStatus) => void,
+  onUpdatePermissions: (
+    id: string,
+    permissions: Record<string, unknown>
+  ) => void
 ): ColumnDef<UserWithDetails>[] => [
+  {
+    id: 'access',
+    header: 'Access',
+    cell: ({ row }) => {
+      const permissions = row.original.permissions ?? {};
+      const keys = Object.keys(permissions);
+      if (keys.length === 0) {
+        return (
+          <span className='text-muted-foreground text-xs'>Role default</span>
+        );
+      }
+      return <Badge variant='secondary'>{keys.length} permissions</Badge>;
+    }
+  },
   {
     accessorKey: 'email',
     header: 'User',
@@ -139,6 +157,62 @@ export const columns = (
                     </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>Access Profile</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuItem
+                  onClick={() => onUpdatePermissions(user.id, {})}
+                >
+                  Role default
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    onUpdatePermissions(user.id, {
+                      underwriting: {
+                        view: true,
+                        quote: true,
+                        bind: true,
+                        endorse: true
+                      }
+                    })
+                  }
+                >
+                  Underwriting Full
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    onUpdatePermissions(user.id, {
+                      underwriting: { view: true, quote: true },
+                      crm: { view: true }
+                    })
+                  }
+                >
+                  Underwriting Limited
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    onUpdatePermissions(user.id, {
+                      crm: { view: true, manage: true },
+                      underwriting: { view: true }
+                    })
+                  }
+                >
+                  CRM Manager
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    onUpdatePermissions(user.id, {
+                      readonly: true,
+                      crm: { view: true },
+                      underwriting: { view: true }
+                    })
+                  }
+                >
+                  Read Only
+                </DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 

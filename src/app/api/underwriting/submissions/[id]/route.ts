@@ -8,6 +8,7 @@ const ALLOWED_STATUSES = [
   'REVIEW',
   'QUOTED',
   'BOUND',
+  'POLICY_ISSUED',
   'DECLINED',
   'EXPIRED'
 ] as const;
@@ -70,6 +71,16 @@ export async function PATCH(
         return apiResponse({ error: 'Invalid status' }, 400 as never);
       }
 
+      if (status === 'BOUND') {
+        return apiResponse(
+          {
+            error:
+              'Direct BIND is disabled. Use POST /api/underwriting/submissions/:id/bind'
+          },
+          400 as never
+        );
+      }
+
       if (uwDecision && !ALLOWED_UW_DECISIONS.includes(uwDecision)) {
         return apiResponse({ error: 'Invalid uwDecision' }, 400 as never);
       }
@@ -99,20 +110,6 @@ export async function PATCH(
               ...(quoteValidFrom && { validFrom: new Date(quoteValidFrom) }),
               ...(quoteValidUntil && { validUntil: new Date(quoteValidUntil) })
             }
-          });
-        }
-      }
-
-      // When binding → mark quote as BOUND
-      if (status === 'BOUND') {
-        const latestQuote = await prisma.quote.findFirst({
-          where: { submissionId: id },
-          orderBy: { createdAt: 'desc' }
-        });
-        if (latestQuote) {
-          await prisma.quote.update({
-            where: { id: latestQuote.id },
-            data: { status: 'BOUND' }
           });
         }
       }

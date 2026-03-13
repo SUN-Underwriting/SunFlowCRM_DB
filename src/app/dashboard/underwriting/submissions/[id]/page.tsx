@@ -92,6 +92,20 @@ interface Submission {
   quotes: Quote[];
 }
 
+interface Endorsement {
+  id: string;
+  endorsementNo: string;
+  type:
+    | 'VESSEL_CHANGE'
+    | 'NAVIGATION_EXT'
+    | 'LAYUP_CHANGE'
+    | 'ADDITIONAL_INSURED';
+  status: 'PENDING' | 'APPROVED' | 'APPLIED' | 'DECLINED';
+  effectiveDate: string;
+  premiumDelta?: number | null;
+  notes?: string | null;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmt(val: number | undefined | null, decimals = 0) {
@@ -134,6 +148,11 @@ const STATUS_CONFIG: Record<
   },
   QUOTED: { label: 'Quoted', color: 'text-sky-400', bg: 'bg-sky-900/40' },
   BOUND: { label: 'Bound', color: 'text-emerald-400', bg: 'bg-emerald-900/40' },
+  POLICY_ISSUED: {
+    label: 'Policy Issued',
+    color: 'text-emerald-300',
+    bg: 'bg-emerald-900/50'
+  },
   DECLINED: { label: 'Declined', color: 'text-red-400', bg: 'bg-red-900/40' },
   EXPIRED: { label: 'Expired', color: 'text-zinc-500', bg: 'bg-zinc-800' }
 };
@@ -254,18 +273,44 @@ export default function SubmissionDetailPage() {
   const [issueOpen, setIssueOpen] = useState(false);
   const [issueValidFrom, setIssueValidFrom] = useState('');
   const [issueValidUntil, setIssueValidUntil] = useState('');
+  const [endorsements, setEndorsements] = useState<Endorsement[]>([]);
+  const [creatingEndorsement, setCreatingEndorsement] = useState(false);
+  const [endorsementForm, setEndorsementForm] = useState({
+    type: 'VESSEL_CHANGE',
+    effectiveDate: '',
+    premiumDelta: '',
+    notes: '',
+    changesJson: '{}'
+  });
 
   const id = params?.id as string;
 
+  async function loadSubmission(submissionId: string) {
+    const res = await fetch(`/api/underwriting/submissions/${submissionId}`);
+    if (!res.ok) throw new Error('Failed to load submission');
+    const json = await res.json();
+    const data = json?.data?.submission;
+    setSub(data ?? null);
+    setUwNotes(data?.uwNotes ?? '');
+  }
+
+  async function loadEndorsements(submissionId: string) {
+    try {
+      const res = await fetch(
+        `/api/underwriting/submissions/${submissionId}/endorsements`
+      );
+      if (!res.ok) return;
+      const json = await res.json();
+      setEndorsements(json?.data?.endorsements ?? []);
+    } catch {
+      // non-blocking
+    }
+  }
+
   useEffect(() => {
     if (!id) return;
-    fetch(`/api/underwriting/submissions/${id}`)
-      .then((r) => r.json())
-      .then((json) => {
-        const data = json?.data?.submission;
-        setSub(data ?? null);
-        setUwNotes(data?.uwNotes ?? '');
-      })
+    loadSubmission(id)
+      .then(() => loadEndorsements(id))
       .catch(() => toast.error('Failed to load submission'))
       .finally(() => setLoading(false));
   }, [id]);
@@ -436,6 +481,100 @@ export default function SubmissionDetailPage() {
     }
   }
 
+  async function bindPolicy() {
+    setActionLoading('BIND');
+    try {
+      const res = await fetch(`/api/underwriting/submissions/${id}/bind`, {
+        method: 'POST'
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json?.error?.message || json?.error || 'Bind failed');
+      }
+      await loadSubmission(id);
+      toast.success('Policy bound and issued');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to bind policy');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function createEndorsement() {
+    if (!endorsementForm.effectiveDate) {
+      toast.error('Effective date is required');
+      return;
+    }
+
+    let changes: Record<string, unknown> = {};
+    try {
+      changes = JSON.parse(endorsementForm.changesJson || '{}');
+    } catch {
+      toast.error('Changes JSON is invalid');
+      return;
+    }
+
+    setCreatingEndorsement(true);
+    try {
+      const res = await fetch(
+        `/api/underwriting/submissions/${id}/endorsements`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: endorsementForm.type,
+            effectiveDate: endorsementForm.effectiveDate,
+            premiumDelta:
+              endorsementForm.premiumDelta.trim() === ''
+                ? null
+                : Number(endorsementForm.premiumDelta),
+            notes: endorsementForm.notes,
+            changes
+          })
+        }
+      );
+      if (!res.ok) throw new Error();
+      await loadEndorsements(id);
+      setEndorsementForm((prev) => ({
+        ...prev,
+        premiumDelta: '',
+        notes: '',
+        changesJson: '{}'
+      }));
+      toast.success('Endorsement created');
+    } catch {
+      toast.error('Failed to create endorsement');
+    } finally {
+      setCreatingEndorsement(false);
+    }
+  }
+
+  async function setEndorsementStatus(
+    endorsementId: string,
+    status: 'APPROVED' | 'APPLIED' | 'DECLINED'
+  ) {
+    try {
+      const res = await fetch(
+        `/api/underwriting/endorsements/${endorsementId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status })
+        }
+      );
+      if (!res.ok) throw new Error();
+      await Promise.all([
+        loadEndorsements(id),
+        fetch(`/api/underwriting/submissions/${id}`)
+          .then((r) => r.json())
+          .then((json) => setSub(json?.data?.submission ?? null))
+      ]);
+      toast.success(`Endorsement ${status.toLowerCase()}`);
+    } catch {
+      toast.error('Failed to update endorsement status');
+    }
+  }
+
   if (loading) {
     return (
       <div className='flex h-96 items-center justify-center'>
@@ -467,14 +606,17 @@ export default function SubmissionDetailPage() {
   const canReview = sub.status === 'SUBMITTED';
   const canRefer =
     ['SUBMITTED', 'REVIEW'].includes(sub.status) && sub.uwDecision !== 'REFER';
-  const canDecline = !['BOUND', 'DECLINED', 'EXPIRED'].includes(sub.status);
+  const canDecline = ![
+    'BOUND',
+    'POLICY_ISSUED',
+    'DECLINED',
+    'EXPIRED'
+  ].includes(sub.status);
   const canIssueQuote = !!quote && ['SUBMITTED', 'REVIEW'].includes(sub.status);
   const uwFlags: string[] = (quote?.uwFlags as string[]) ?? [];
   const autoDecline = quote?.autoDecline ?? null;
   const hasBlocker = uwFlags.some((f) => f.includes('CANNOT BIND'));
   const canBind = sub.status === 'QUOTED' && !autoDecline && !hasBlocker;
-  const isTerminal = ['BOUND', 'DECLINED', 'EXPIRED'].includes(sub.status);
-
   return (
     <div className='mx-auto max-w-6xl space-y-6 px-6 py-8'>
       {/* ── Header ── */}
@@ -563,12 +705,12 @@ export default function SubmissionDetailPage() {
             )}
             {canBind && (
               <button
-                onClick={() => updateStatus('BOUND')}
-                disabled={actionLoading === 'BOUND'}
+                onClick={bindPolicy}
+                disabled={actionLoading === 'BIND'}
                 className='flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-500 disabled:opacity-50'
               >
                 <IconCircleCheck className='h-4 w-4' />
-                Bind Policy
+                {actionLoading === 'BIND' ? 'Binding…' : 'Accept & Bind'}
               </button>
             )}
             {sub.status === 'QUOTED' && (autoDecline || hasBlocker) && (
@@ -580,7 +722,7 @@ export default function SubmissionDetailPage() {
                 Bind Blocked
               </span>
             )}
-            {sub.status === 'BOUND' && (
+            {['BOUND', 'POLICY_ISSUED'].includes(sub.status) && (
               <>
                 <button
                   onClick={downloadPolicy}
@@ -592,7 +734,7 @@ export default function SubmissionDetailPage() {
                 </button>
                 <span className='flex items-center gap-1.5 rounded-lg bg-emerald-900/40 px-4 py-2 text-sm font-semibold text-emerald-400'>
                   <IconCircleCheck className='h-4 w-4' />
-                  Bound
+                  {sub.status === 'POLICY_ISSUED' ? 'Policy Issued' : 'Bound'}
                 </span>
               </>
             )}
@@ -1044,6 +1186,134 @@ export default function SubmissionDetailPage() {
             >
               {saving ? 'Saving...' : 'Save Notes'}
             </button>
+          </Section>
+
+          <Section title='Endorsements' icon={IconFileText}>
+            <div className='space-y-3'>
+              <div className='grid grid-cols-1 gap-2'>
+                <select
+                  value={endorsementForm.type}
+                  onChange={(e) =>
+                    setEndorsementForm((prev) => ({
+                      ...prev,
+                      type: e.target.value
+                    }))
+                  }
+                  className='rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100'
+                >
+                  <option value='VESSEL_CHANGE'>Vessel Change</option>
+                  <option value='NAVIGATION_EXT'>Navigation Extension</option>
+                  <option value='LAYUP_CHANGE'>Lay-up Change</option>
+                  <option value='ADDITIONAL_INSURED'>Additional Insured</option>
+                </select>
+                <input
+                  type='date'
+                  value={endorsementForm.effectiveDate}
+                  onChange={(e) =>
+                    setEndorsementForm((prev) => ({
+                      ...prev,
+                      effectiveDate: e.target.value
+                    }))
+                  }
+                  className='rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100'
+                />
+                <input
+                  placeholder='Premium delta (optional)'
+                  value={endorsementForm.premiumDelta}
+                  onChange={(e) =>
+                    setEndorsementForm((prev) => ({
+                      ...prev,
+                      premiumDelta: e.target.value
+                    }))
+                  }
+                  className='rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100'
+                />
+                <textarea
+                  placeholder='Changes JSON (e.g. {\"layUpMonths\": 4})'
+                  rows={2}
+                  value={endorsementForm.changesJson}
+                  onChange={(e) =>
+                    setEndorsementForm((prev) => ({
+                      ...prev,
+                      changesJson: e.target.value
+                    }))
+                  }
+                  className='w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100'
+                />
+                <textarea
+                  placeholder='Notes'
+                  rows={2}
+                  value={endorsementForm.notes}
+                  onChange={(e) =>
+                    setEndorsementForm((prev) => ({
+                      ...prev,
+                      notes: e.target.value
+                    }))
+                  }
+                  className='w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100'
+                />
+                <button
+                  onClick={createEndorsement}
+                  disabled={creatingEndorsement}
+                  className='rounded-lg bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50'
+                >
+                  {creatingEndorsement ? 'Creating...' : 'Create Endorsement'}
+                </button>
+              </div>
+
+              <div className='space-y-2 border-t border-zinc-800 pt-3'>
+                {endorsements.length === 0 && (
+                  <p className='text-xs text-zinc-500'>No endorsements yet.</p>
+                )}
+                {endorsements.map((e) => (
+                  <div
+                    key={e.id}
+                    className='rounded-lg border border-zinc-800 p-2.5'
+                  >
+                    <div className='flex items-center justify-between gap-2'>
+                      <div>
+                        <p className='font-mono text-xs text-zinc-300'>
+                          {e.endorsementNo}
+                        </p>
+                        <p className='text-xs text-zinc-500'>
+                          {e.type} · {e.status} · {fmtDate(e.effectiveDate)}
+                        </p>
+                      </div>
+                      {e.status !== 'APPLIED' && e.status !== 'DECLINED' && (
+                        <div className='flex gap-1'>
+                          {e.status === 'PENDING' && (
+                            <button
+                              onClick={() =>
+                                setEndorsementStatus(e.id, 'APPROVED')
+                              }
+                              className='rounded bg-zinc-700 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-600'
+                            >
+                              Approve
+                            </button>
+                          )}
+                          <button
+                            onClick={() =>
+                              setEndorsementStatus(e.id, 'APPLIED')
+                            }
+                            className='rounded bg-emerald-700 px-2 py-1 text-xs text-white hover:bg-emerald-600'
+                          >
+                            Apply
+                          </button>
+                          <button
+                            onClick={() =>
+                              setEndorsementStatus(e.id, 'DECLINED')
+                            }
+                            className='rounded bg-red-800 px-2 py-1 text-xs text-red-100 hover:bg-red-700'
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </Section>
 
           {/* AI Analysis */}

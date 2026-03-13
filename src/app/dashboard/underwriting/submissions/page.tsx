@@ -20,6 +20,7 @@ type SubmissionStatus =
   | 'REVIEW'
   | 'QUOTED'
   | 'BOUND'
+  | 'POLICY_ISSUED'
   | 'DECLINED'
   | 'EXPIRED';
 
@@ -45,6 +46,7 @@ const STATUS_STYLES: Record<SubmissionStatus, string> = {
   REVIEW: 'bg-yellow-500/20 text-yellow-400',
   QUOTED: 'bg-green-500/20 text-green-400',
   BOUND: 'bg-emerald-500/20 text-emerald-400',
+  POLICY_ISSUED: 'bg-emerald-500/30 text-emerald-300',
   DECLINED: 'bg-red-500/20 text-red-400',
   EXPIRED: 'bg-gray-500/20 text-gray-500'
 };
@@ -54,6 +56,7 @@ const ALL_STATUSES: SubmissionStatus[] = [
   'REVIEW',
   'QUOTED',
   'BOUND',
+  'POLICY_ISSUED',
   'DECLINED',
   'EXPIRED'
 ];

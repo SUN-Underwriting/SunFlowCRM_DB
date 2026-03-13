@@ -1,5 +1,6 @@
 import { type Table as TanstackTable, flexRender } from '@tanstack/react-table';
 import type * as React from 'react';
+import { cn } from '@/lib/utils';
 
 import { DataTablePagination } from '@/components/ui/table/data-table-pagination';
 import {
@@ -21,10 +22,12 @@ interface DataTableProps<TData> extends React.ComponentProps<'div'> {
 export function DataTable<TData>({
   table,
   actionBar,
-  children
+  children,
+  className,
+  ...props
 }: DataTableProps<TData>) {
   return (
-    <div className='flex flex-1 flex-col space-y-4'>
+    <div className={cn('flex flex-1 flex-col space-y-4', className)} {...props}>
       {children}
       <div className='relative flex flex-1'>
         <div className='absolute inset-0 flex overflow-hidden rounded-lg border'>

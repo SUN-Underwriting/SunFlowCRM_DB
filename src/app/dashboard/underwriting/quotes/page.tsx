@@ -1,9 +1,16 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { IconReportMoney, IconPlus, IconShip } from '@tabler/icons-react';
+import {
+  IconReportMoney,
+  IconPlus,
+  IconShip,
+  IconSearch,
+  IconX
+} from '@tabler/icons-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
 type QuoteStatus =
   | 'INDICATION'
@@ -40,6 +47,15 @@ const STATUS_STYLES: Record<QuoteStatus, string> = {
   SUPERSEDED: 'bg-gray-500/20 text-gray-400'
 };
 
+const ALL_STATUSES: QuoteStatus[] = [
+  'INDICATION',
+  'FIRM',
+  'BOUND',
+  'DECLINED',
+  'EXPIRED',
+  'SUPERSEDED'
+];
+
 function StatusBadge({ status }: { status: QuoteStatus }) {
   return (
     <span
@@ -59,6 +75,8 @@ async function fetchQuotes(): Promise<Quote[]> {
 
 export default function QuotesPage() {
   const router = useRouter();
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<QuoteStatus | 'ALL'>('ALL');
   const {
     data: quotes = [],
     isLoading,
@@ -67,6 +85,19 @@ export default function QuotesPage() {
     queryKey: ['underwriting', 'quotes'],
     queryFn: fetchQuotes,
     staleTime: 30 * 1000
+  });
+
+  const filtered = quotes.filter((q) => {
+    const haystack = [
+      q.quoteNumber,
+      q.submission.reference,
+      q.submission.vesselName ?? ''
+    ]
+      .join(' ')
+      .toLowerCase();
+    const matchSearch = !search || haystack.includes(search.toLowerCase());
+    const matchStatus = statusFilter === 'ALL' || q.status === statusFilter;
+    return matchSearch && matchStatus;
   });
 
   return (
@@ -85,6 +116,50 @@ export default function QuotesPage() {
           <IconPlus className='h-4 w-4' />
           New Quote
         </Link>
+      </div>
+
+      {/* Filters */}
+      <div className='flex flex-wrap items-center gap-3'>
+        <div className='relative max-w-xs min-w-[220px] flex-1'>
+          <IconSearch className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
+          <input
+            type='text'
+            placeholder='Search quote, submission, vessel…'
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className='bg-card border-border w-full rounded-lg border py-2 pr-3 pl-9 text-sm outline-none focus:border-blue-500'
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className='absolute top-1/2 right-2 -translate-y-1/2'
+            >
+              <IconX className='text-muted-foreground h-4 w-4' />
+            </button>
+          )}
+        </div>
+        <div className='flex flex-wrap gap-1.5'>
+          <button
+            onClick={() => setStatusFilter('ALL')}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${statusFilter === 'ALL' ? 'bg-zinc-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
+          >
+            All
+          </button>
+          {ALL_STATUSES.map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(statusFilter === s ? 'ALL' : s)}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${statusFilter === s ? STATUS_STYLES[s] + ' ring-1 ring-current' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        {(search || statusFilter !== 'ALL') && (
+          <span className='text-muted-foreground text-xs'>
+            {filtered.length} of {quotes.length}
+          </span>
+        )}
       </div>
 
       <div className='bg-card overflow-hidden rounded-xl border'>
@@ -120,7 +195,27 @@ export default function QuotesPage() {
           </div>
         )}
 
-        {!isLoading && !isError && quotes.length > 0 && (
+        {!isLoading &&
+          !isError &&
+          quotes.length > 0 &&
+          filtered.length === 0 && (
+            <div className='flex flex-col items-center justify-center gap-2 py-16 text-center'>
+              <p className='text-muted-foreground text-sm'>
+                No quotes match your filters.
+              </p>
+              <button
+                onClick={() => {
+                  setSearch('');
+                  setStatusFilter('ALL');
+                }}
+                className='text-xs text-blue-400 hover:underline'
+              >
+                Clear filters
+              </button>
+            </div>
+          )}
+
+        {!isLoading && !isError && filtered.length > 0 && (
           <table className='w-full text-sm'>
             <thead>
               <tr className='text-muted-foreground border-b text-left text-xs tracking-wide uppercase'>
@@ -136,7 +231,7 @@ export default function QuotesPage() {
               </tr>
             </thead>
             <tbody>
-              {quotes.map((q) => (
+              {filtered.map((q) => (
                 <tr
                   key={q.id}
                   onClick={() =>

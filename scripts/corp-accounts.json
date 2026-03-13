@@ -1,0 +1,20 @@
+[
+  {
+    "email": "ops@company.com",
+    "role": "MANAGER",
+    "firstName": "Operations",
+    "lastName": "Manager"
+  },
+  {
+    "email": "uw.lead@company.com",
+    "role": "UNDERWRITER",
+    "firstName": "Underwriting",
+    "lastName": "Lead"
+  },
+  {
+    "email": "sales@company.com",
+    "role": "SALES",
+    "firstName": "Sales",
+    "lastName": "Team"
+  }
+]

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
+import { withCurrentUser } from '@/lib/auth/get-current-user';
 import {
   Document,
   Packer,
@@ -645,42 +646,44 @@ function buildSlip(sub: any, quote: any): Document {
 // ── Route handler ─────────────────────────────────────────────
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
-    const sub = await prisma.submission.findUnique({
-      where: { id },
-      include: {
-        quotes: {
-          orderBy: { createdAt: 'desc' },
-          take: 1
+    return await withCurrentUser(req, async (user) => {
+      const { id } = await params;
+      const sub = await prisma.submission.findFirst({
+        where: { id, tenantId: user.tenantId, deleted: false },
+        include: {
+          quotes: {
+            orderBy: { createdAt: 'desc' },
+            take: 1
+          }
         }
+      });
+
+      if (!sub) {
+        return NextResponse.json(
+          { error: 'Submission not found' },
+          { status: 404 }
+        );
       }
-    });
 
-    if (!sub) {
-      return NextResponse.json(
-        { error: 'Submission not found' },
-        { status: 404 }
-      );
-    }
+      const quote = sub.quotes[0] ?? null;
+      const doc = buildSlip(sub, quote);
+      const buffer = await Packer.toBuffer(doc);
 
-    const quote = sub.quotes[0] ?? null;
-    const doc = buildSlip(sub, quote);
-    const buffer = await Packer.toBuffer(doc);
+      const filename = `QuoteSlip_${sub.reference}.docx`;
 
-    const filename = `QuoteSlip_${sub.reference}.docx`;
-
-    return new NextResponse(new Uint8Array(buffer), {
-      status: 200,
-      headers: {
-        'Content-Type':
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'Content-Disposition': `attachment; filename="${filename}"`,
-        'Content-Length': String(buffer.length)
-      }
+      return new NextResponse(new Uint8Array(buffer), {
+        status: 200,
+        headers: {
+          'Content-Type':
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+          'Content-Length': String(buffer.length)
+        }
+      });
     });
   } catch (err) {
     console.error('[slip] Error:', err);
