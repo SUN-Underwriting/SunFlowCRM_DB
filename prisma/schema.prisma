@@ -48,6 +48,10 @@ model Tenant {
   fieldDefinitions   FieldDefinition[]
   notes              Note[]
 
+  // UW Relations
+  submissions        Submission[]
+  quotes             Quote[]
+
   @@map("tenants")
 }
 
@@ -103,8 +107,9 @@ model User {
   emails             Email[]
   emailAccounts      EmailAccount[]
   notes              Note[]
-  leadPermittedUsers LeadPermittedUser[]
-  dealPermittedUsers DealPermittedUser[]
+  leadPermittedUsers  LeadPermittedUser[]
+  dealPermittedUsers  DealPermittedUser[]
+  uwSubmissions       Submission[]        @relation("SubmissionUW") // UW module
 
   @@unique([email, tenantId], name: "user_email_tenant_unique")
   @@index([tenantId])
@@ -317,14 +322,15 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  owner      User?      @relation(fields: [ownerId], references: [id], onDelete: SetNull)
-  persons    Person[]
-  deals      Deal[]
-  leads      Lead[]
-  activities Activity[]
-  emails     Email[]
-  notes      Note[]
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner       User?        @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  persons     Person[]
+  deals       Deal[]
+  leads       Lead[]
+  activities  Activity[]
+  emails      Email[]
+  notes       Note[]
+  submissions Submission[] // UW module
 
   @@index([tenantId])
   @@index([tenantId, deleted])
@@ -354,13 +360,14 @@ model Person {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  organization Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
-  deals        Deal[]
-  leads        Lead[]
-  activities   Activity[]
-  emails       Email[]
-  notes        Note[]
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  organization  Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  deals         Deal[]
+  leads         Lead[]
+  activities    Activity[]
+  emails        Email[]
+  notes         Note[]
+  submissions   Submission[]  // UW module
 
   @@index([tenantId])
   @@index([tenantId, deleted])
@@ -932,4 +939,267 @@ enum FieldType {
   DATE
   SELECT
   MULTI_SELECT
+}
+
+// ============================================
+// UNDERWRITING MODULE — Marine Yacht
+// Branch: feature/underwriting-module
+// Facility: SUN-MYC-001
+// ============================================
+
+model Submission {
+  id        String           @id @default(cuid())
+  tenantId  String
+  reference String           @unique // SUN-2026-001234
+  status    SubmissionStatus @default(DRAFT)
+
+  // Links to existing CRM entities
+  orgId    String? // Broker organization (Organization.id)
+  personId String? // Insured person (Person.id)
+  dealId   String? // Linked CRM deal (soft ref, no FK to avoid circular)
+
+  // Vessel
+  vesselName      String?
+  vesselType      VesselType?
+  yearBuilt       Int?
+  lengthFeet      Decimal?    @db.Decimal(6, 1)
+  hullValue       Decimal?    @db.Decimal(14, 2)
+  currency        String      @default("USD")
+  territory       Territory   @default(ROW)
+  useType         UseType     @default(PRIVATE)
+  navigationArea  String?
+  navAreaModifier String? // MED_EU | AUS_NZ | WEST_COAST_US_MX | etc.
+  maxSpeedKnots   Int?
+
+  // Vessel characteristics
+  hasAutoFireExt  Boolean @default(false)
+  professionalCrew Boolean @default(false)
+  hasYachtingQual Boolean @default(false)
+  dieselOnly      Boolean @default(false)
+  englishLaw      Boolean @default(true)
+  inlandWatersOnly Boolean @default(false)
+
+  // Coverage requested
+  liabilityLimit   Decimal? @db.Decimal(14, 2)
+  tenderValue      Decimal? @db.Decimal(12, 2)
+  personalProperty Decimal? @db.Decimal(12, 2)
+  electronicsValue Decimal? @db.Decimal(12, 2)
+  includeTowing    Boolean  @default(false)
+  includeTrailer   Boolean  @default(false)
+  trailerValue     Decimal? @db.Decimal(10, 2)
+  includeWindstorm Boolean  @default(false) // false = exclude windstorm box (-10%)
+
+  // Optional additional covers (Facility Appendix 6)
+  medicalExpensesLimit   Int @default(10000)  // 10000=included, 25000, 50000, 100000
+  uninsuredBoatersLimit  Int @default(25000)  // 25000=included, 100000
+  crewLiabilityLimit     Int @default(0)      // 0=none, 300000–3000000
+
+  // Deductible
+  hullDeductiblePct Decimal @default(0.02) @db.Decimal(4, 3) // 0.01–0.05
+
+  // Loss history (rolling 3 years)
+  faultClaimsCY Int @default(0) // Current year
+  faultClaimsPY Int @default(0) // Prior year
+  faultClaims2Y Int @default(0) // 2 years ago
+  faultClaims3Y Int @default(0) // 3 years ago
+  noFaultClaims Int @default(0) // Non-fault claims any period
+
+  // Ocean transits JSON: [{"route":"TRANS_ATLANTIC","direction":"ONE_WAY"}]
+  transits Json @default("[]")
+
+  // Lay-up months (max 6, -5% per month)
+  layUpMonths Int @default(0)
+
+  // Insured & Broker free-text (overrides CRM link)
+  insuredName   String?
+  brokerName    String?
+  brokerCompany String?
+  brokerEmail   String?
+
+  // AI analysis (stored for audit + display)
+  aiAnalysis     Json?
+  aiModelVersion String?
+  aiAnalyzedAt   DateTime?
+
+  // UW decision
+  uwNotes       String?    @db.Text
+  uwDecision    UWDecision?
+  underwriterId String?
+
+  deleted   Boolean   @default(false)
+  deletedAt DateTime?
+  createdBy String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  person       Person?       @relation(fields: [personId], references: [id], onDelete: SetNull)
+  underwriter  User?         @relation("SubmissionUW", fields: [underwriterId], references: [id])
+  quotes       Quote[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, deleted])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([orgId])
+  @@map("submissions")
+}
+
+model Quote {
+  id           String      @id @default(cuid())
+  tenantId     String
+  submissionId String
+  quoteNumber  String      @unique // SUN-Q-2026-001234
+  version      Int         @default(1)
+  status       QuoteStatus @default(INDICATION)
+
+  // Rating output (Decimal for financial precision)
+  hullPremium      Decimal @db.Decimal(12, 2)
+  liabilityPremium Decimal @db.Decimal(12, 2)
+  optionalPremiums Json    @default("{}") // {tender, personalProperty, electronics, towing, trailer, transits}
+  totalPremium     Decimal @db.Decimal(12, 2)
+
+  // Full rating breakdown (immutable audit trail)
+  baseRatePct      Decimal @db.Decimal(6, 4)
+  adjustedRatePct  Decimal @db.Decimal(6, 4)
+  netAdjustmentPct Decimal @db.Decimal(6, 2)
+  discountsApplied Json    @default("[]") // [{code, label, pct}]
+  loadingsApplied  Json    @default("[]") // [{code, label, pct}]
+  rateTableSource  String  @default("SUN-MYC-001_Appendix6_v2021")
+
+  // Deductibles
+  hullDeductible    Decimal @db.Decimal(10, 2)
+  hullDeductiblePct Decimal @db.Decimal(4, 3)
+  liabilityDed      Decimal @db.Decimal(10, 2)
+
+  // UW flags from engine
+  uwFlags     Json    @default("[]") // string[] — warnings, referral reasons
+  autoDecline String? // if set — hard stop reason, bind must be blocked
+
+  // UW approval
+  uwNotes    String?   @db.Text
+  approvedBy String?
+  approvedAt DateTime?
+
+  // Validity
+  validFrom  DateTime? @db.Date
+  validUntil DateTime? @db.Date
+
+  // Generated document
+  documentPath        String?
+  documentGeneratedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([submissionId])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("quotes")
+}
+
+// Hull rate bands — loaded from SUN-MYC-001 Appendix 6
+model HullRateBand {
+  id            String    @id @default(cuid())
+  territory     Territory
+  minValue      Decimal   @db.Decimal(14, 2)
+  maxValue      Decimal?  @db.Decimal(14, 2) // NULL = unlimited (top band)
+  ratePct       Decimal   @db.Decimal(6, 4) // e.g. 0.0175 = 1.75%
+  effectiveDate DateTime  @db.Date
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+
+  @@index([territory, isActive])
+  @@map("hull_rate_bands")
+}
+
+// P&I rate tables — private and charter, by length bracket
+model PiRateBand {
+  id             String    @id @default(cuid())
+  territory      Territory
+  useType        UseType
+  liabilityLimit Decimal   @db.Decimal(14, 2) // 300000 | 500000 | 1000000 | 2000000 | 3000000
+  maxLengthFt    Int // upper bound of length bracket (35 | 40 | 45 | 50 | 60 | 999)
+  annualPremium  Decimal   @db.Decimal(10, 2)
+  effectiveDate  DateTime  @db.Date
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+
+  @@index([territory, useType, isActive])
+  @@map("pi_rate_bands")
+}
+
+// Discount & loading factors catalogue
+model RatingFactor {
+  id          String         @id @default(cuid())
+  code        String         @unique // e.g. SAILING_VESSEL_HULL
+  category    FactorCategory
+  label       String // Human-readable label for UI
+  description String         @db.Text
+  valuePct    Decimal        @db.Decimal(6, 4) // negative = discount, positive = loading
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+
+  @@map("rating_factors")
+}
+
+// ============================================
+// UW ENUMS
+// ============================================
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  REVIEW
+  QUOTED
+  BOUND
+  DECLINED
+  EXPIRED
+}
+
+enum QuoteStatus {
+  INDICATION
+  FIRM
+  BOUND
+  DECLINED
+  EXPIRED
+  SUPERSEDED
+}
+
+enum UWDecision {
+  APPROVE
+  DECLINE
+  REFER
+  MORE_INFO
+}
+
+enum VesselType {
+  SAILING
+  MOTOR
+  CATAMARAN
+  TRIMARAN
+  POWER
+  OTHER
+}
+
+enum Territory {
+  US_CA_MX_CARIB
+  ROW
+}
+
+enum UseType {
+  PRIVATE
+  CHARTER
+  BAREBOAT
+}
+
+enum FactorCategory {
+  DISCOUNT
+  LOADING
+  TRANSIT
 }

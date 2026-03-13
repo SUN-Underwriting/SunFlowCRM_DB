@@ -36,7 +36,7 @@ function isProtected(pathname: string): boolean {
  * Next.js middleware for route protection.
  * Optimized for Edge Runtime with minimal imports.
  */
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Never interfere with public / auth routes

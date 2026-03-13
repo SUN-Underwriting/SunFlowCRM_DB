@@ -103,7 +103,7 @@ async function main() {
       ownerId: user.id,
       title: 'Enterprise Software Deal',
       source: 'WEBSITE',
-      status: 'NEW',
+      status: 'OPEN',
       personId: person.id,
       orgId: org.id
     }

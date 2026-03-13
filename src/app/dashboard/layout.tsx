@@ -31,12 +31,17 @@ export default async function DashboardLayout({
   return (
     <Suspense fallback={<DashboardLoading />}>
       <KBar>
-        <SidebarProvider defaultOpen={defaultOpen}>
+        <SidebarProvider
+          defaultOpen={defaultOpen}
+          className='h-screen overflow-hidden'
+        >
           <InfobarProvider defaultOpen={false}>
             <AppSidebar />
-            <SidebarInset>
+            <SidebarInset className='overflow-hidden'>
               <Header />
-              {children}
+              <div className='flex min-h-0 flex-1 flex-col overflow-y-auto'>
+                {children}
+              </div>
             </SidebarInset>
             <InfoSidebar side='right' />
           </InfobarProvider>

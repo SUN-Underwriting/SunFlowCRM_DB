@@ -97,6 +97,29 @@ export const navItems: NavItem[] = [
     ]
   },
   {
+    title: 'Underwriting',
+    url: '#',
+    icon: 'underwriting',
+    isActive: false,
+    items: [
+      {
+        title: 'New Quote',
+        url: '/dashboard/underwriting/new',
+        icon: 'calculator'
+      },
+      {
+        title: 'Submissions',
+        url: '/dashboard/underwriting/submissions',
+        icon: 'submissions'
+      },
+      {
+        title: 'Quotes',
+        url: '/dashboard/underwriting/quotes',
+        icon: 'quotes'
+      }
+    ]
+  },
+  {
     title: 'Teams',
     url: '/dashboard/workspaces/team',
     icon: 'teams',
