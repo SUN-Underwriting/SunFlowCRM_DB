@@ -150,6 +150,18 @@ function fmtDate(iso: string | Date | null | undefined): string {
   });
 }
 
+function fmtPct(value: number | null | undefined, signed = false): string {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  let pct = Number(value);
+  // Guard: some legacy values may already be scaled by 100 (e.g. -1000 for -10.0%).
+  if (Math.abs(pct) > 100) {
+    pct = pct / 100;
+  }
+  const normalized = pct.toFixed(1);
+  if (signed && pct > 0) return `+${normalized}%`;
+  return `${normalized}%`;
+}
+
 function buildPolicy(sub: any, quote: any): Document {
   const policyNumber = `POL-${sub.reference.replace('SUN-', '')}`;
   const boundQuote =
@@ -309,7 +321,7 @@ function buildPolicy(sub: any, quote: any): Document {
                 alignment: AlignmentType.CENTER,
                 children: [
                   new TextRun({
-                    text: `Coverholder: London Marine Insurance Services Ltd.  ·  Facility: SUN-MYC-001  ·  Policy: ${policyNumber}  ·  Page `,
+                    text: `Facility: SUN-MYC-001  ·  Policy: ${policyNumber}  ·  Page `,
                     size: 16,
                     color: MUTED,
                     font: 'Arial'
@@ -502,15 +514,15 @@ function buildPolicy(sub: any, quote: any): Document {
                 table2col([
                   sectionHeader('RATING ADJUSTMENTS'),
                   ...discounts.map((d) =>
-                    row2(`Discount — ${d.label}`, `${d.pct.toFixed(1)}%`)
+                    row2(`Discount — ${d.label}`, fmtPct(d.pct))
                   ),
                   ...loadings.map((l) =>
-                    row2(`Loading — ${l.label}`, `+${l.pct.toFixed(1)}%`)
+                    row2(`Loading — ${l.label}`, fmtPct(l.pct, true))
                   ),
                   row2(
                     'Net Adjustment',
                     boundQuote
-                      ? `${Number(boundQuote.netAdjustmentPct).toFixed(1)}%`
+                      ? fmtPct(Number(boundQuote.netAdjustmentPct))
                       : '—'
                   )
                 ]),
@@ -523,7 +535,6 @@ function buildPolicy(sub: any, quote: any): Document {
             sectionHeader('POLICY CONDITIONS'),
             row2('Policy Number', policyNumber),
             row2('Facility Reference', 'SUN-MYC-001'),
-            row2('Coverholder', 'London Marine Insurance Services Ltd.'),
             row2('Capacity', "Lloyd's Syndicate(s) per Facility SUN-MYC-001"),
             row2('Class of Business', 'Marine Yacht — Hull & P&I'),
             row2('Policy Wording', 'MAR 91 / Institute Yacht Clauses 1.11.85'),
@@ -611,7 +622,7 @@ function buildPolicy(sub: any, quote: any): Document {
                         spacing: { before: 80 },
                         children: [
                           new TextRun({
-                            text: 'This certificate is issued as a matter of information only and confers no rights upon the certificate holder. Coverage is subject to the full terms, conditions, and exclusions of the policy wording. In the event of a claim, notify the coverholder immediately.',
+                            text: 'This certificate is issued as a matter of information only and confers no rights upon the certificate holder. Coverage is subject to the full terms, conditions, and exclusions of the policy wording. In the event of a claim, notify us immediately.',
                             size: 17,
                             color: MUTED,
                             font: 'Arial'
@@ -664,9 +675,7 @@ export async function GET(
       const doc = buildPolicy(submission, quote);
       const buffer = await Packer.toBuffer(doc);
 
-      const policyNumber =
-        submission.policyNumber ??
-        `POL-${submission.reference.replace('SUN-', '')}`;
+      const policyNumber = `POL-${submission.reference.replace('SUN-', '')}`;
 
       return new NextResponse(new Uint8Array(buffer), {
         status: 200,

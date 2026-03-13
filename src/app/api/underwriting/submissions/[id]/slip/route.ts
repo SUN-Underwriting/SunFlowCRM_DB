@@ -321,7 +321,7 @@ function buildSlip(sub: any, quote: any): Document {
                 alignment: AlignmentType.CENTER,
                 children: [
                   new TextRun({
-                    text: 'Coverholder: London Marine Insurance Services Ltd.  ·  Facility: SUN-MYC-001  ·  Page ',
+                    text: 'Facility: SUN-MYC-001  ·  Page ',
                     size: 16,
                     color: MUTED,
                     font: 'Arial'
@@ -615,7 +615,6 @@ function buildSlip(sub: any, quote: any): Document {
           table2col([
             sectionHeader('POLICY CONDITIONS'),
             row2('Facility Reference', 'SUN-MYC-001'),
-            row2('Coverholder', 'London Marine Insurance Services Ltd.'),
             row2('Capacity', "Lloyd's Syndicate(s) per Facility SUN-MYC-001"),
             row2('Class of Business', 'Marine Yacht — Hull & P&I'),
             row2('Policy Wording', 'MAR 91 / Institute Yacht Clauses 1.11.85'),
@@ -629,7 +628,7 @@ function buildSlip(sub: any, quote: any): Document {
           new Paragraph({
             children: [
               new TextRun({
-                text: 'This quote is an indication only and is subject to satisfactory completion of all underwriting requirements and final approval by the coverholder. Premium is net of all commissions. All amounts in USD.',
+                text: 'This quote is an indication only and is subject to satisfactory completion of all underwriting requirements and final approval. Premium is net of all commissions. All amounts in USD.',
                 size: 16,
                 color: MUTED,
                 italics: true,
