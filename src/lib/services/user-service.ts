@@ -7,7 +7,8 @@ import {
   BusinessRuleError
 } from '@/lib/errors/app-errors';
 import { AuditService, AuditActions } from '@/lib/services/audit-service';
-import { v4 as uuidv4 } from 'uuid';
+import { UserInviteService } from '@/lib/services/user-invite-service';
+import { enqueueUserInviteEmailJob } from '@/server/notifications/queue';
 
 export interface CreateUserInput {
   email: string;
@@ -81,35 +82,6 @@ export class UserService extends BaseService {
    * For SuperTokens: creates a placeholder (invite flow, reconciled at sign-up).
    */
   async inviteUser(input: CreateUserInput) {
-    const { getAuthProviderType } = await import(
-      '@/lib/auth/providers/factory'
-    );
-    const provider = getAuthProviderType();
-
-    if (provider === 'stack') {
-      // Full provisioning: Stack Auth + Prisma
-      const { UserProvisioningService } = await import(
-        '@/lib/services/user-provisioning-service'
-      );
-
-      const result = await UserProvisioningService.provisionUser(
-        {
-          email: input.email,
-          firstName: input.firstName,
-          lastName: input.lastName,
-          role: input.role,
-          tenantId: this.tenantId
-        },
-        this.userId
-      );
-
-      // Return compatible shape
-      return await prisma.user.findUnique({ where: { id: result.user.id } });
-    }
-
-    // SuperTokens: placeholder invite flow
-    const placeholderId = `invite:${uuidv4()}`;
-
     const newUser = await prisma.$transaction(async (tx) => {
       const existingUser = await tx.user.findFirst({
         where: { email: input.email, tenantId: this.tenantId }
@@ -126,10 +98,44 @@ export class UserService extends BaseService {
           firstName: input.firstName,
           lastName: input.lastName,
           tenantId: this.tenantId,
-          status: UserStatus.INVITED,
-          supertokensUserId: placeholderId
+          status: UserStatus.INVITED
         }
       });
+    });
+
+    const { invite, token } = await UserInviteService.create({
+      tenantId: this.tenantId,
+      userId: newUser.id,
+      email: newUser.email,
+      createdById: this.userId
+    });
+
+    const appUrl =
+      process.env.NEXT_PUBLIC_APP_URL ??
+      process.env.FRONTEND_URL ??
+      'http://localhost:3000';
+    const inviteUrl = `${appUrl}/auth/accept-invite?token=${encodeURIComponent(token)}`;
+
+    await enqueueUserInviteEmailJob({
+      tenantId: this.tenantId,
+      userId: newUser.id,
+      to: newUser.email,
+      subject: 'You are invited to SunFlow CRM',
+      text: [
+        'You have been invited to join SunFlow CRM.',
+        `Role: ${newUser.role}`,
+        '',
+        `Accept invite: ${inviteUrl}`,
+        '',
+        `This invite expires on ${invite.expiresAt.toISOString()}.`
+      ].join('\n'),
+      html: [
+        '<p>You have been invited to join <strong>SunFlow CRM</strong>.</p>',
+        `<p><strong>Role:</strong> ${newUser.role}</p>`,
+        `<p><a href="${inviteUrl}">Accept your invite</a></p>`,
+        `<p>This invite expires on ${invite.expiresAt.toISOString()}.</p>`
+      ].join(''),
+      dedupeKey: `invite:${invite.id}`
     });
 
     // Audit: user invited
