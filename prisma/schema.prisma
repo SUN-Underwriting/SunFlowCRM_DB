@@ -54,6 +54,7 @@ model Tenant {
   policySequences    PolicySequence[]
   renewalNotifications RenewalNotification[]
   endorsements       PolicyEndorsement[]
+  userInvites       UserInvite[]
 
   @@map("tenants")
 }
@@ -113,12 +114,35 @@ model User {
   leadPermittedUsers  LeadPermittedUser[]
   dealPermittedUsers  DealPermittedUser[]
   uwSubmissions       Submission[]        @relation("SubmissionUW") // UW module
+  receivedInvites     UserInvite[]        @relation("InviteeUser")
+  sentInvites         UserInvite[]        @relation("InviteCreator")
 
   @@unique([email, tenantId], name: "user_email_tenant_unique")
   @@index([tenantId])
   @@index([supertokensUserId])
   @@index([stackAuthUserId])
   @@map("users")
+}
+
+model UserInvite {
+  id          String   @id @default(cuid())
+  tenantId    String
+  userId      String
+  email       String
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User   @relation("InviteeUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation("InviteCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, email, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("user_invites")
 }
 
 enum UserRole {

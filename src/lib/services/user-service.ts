@@ -22,6 +22,7 @@ export interface UpdateUserInput {
   role?: UserRole;
   status?: UserStatus;
   avatar?: string;
+  permissions?: Record<string, unknown>;
 }
 
 /**
@@ -45,6 +46,7 @@ export class UserService extends BaseService {
         lastName: true,
         role: true,
         status: true,
+        permissions: true,
         createdAt: true,
         lastOnline: true,
         avatar: true
@@ -173,6 +175,9 @@ export class UserService extends BaseService {
     if (input.status && input.status !== existingUser.status) {
       changes.statusFrom = existingUser.status;
       changes.statusTo = input.status;
+    }
+    if (input.permissions !== undefined) {
+      changes.permissionsUpdated = true;
     }
     await AuditService.log({
       tenantId: this.tenantId,

@@ -3,71 +3,89 @@
 import { useUsers, useUpdateUser } from '../../hooks/use-settings';
 import { columns } from './users-columns';
 import { DataTable } from '@/components/ui/table/data-table';
-import { useReactTable, getCoreRowModel, getPaginationRowModel, getFilteredRowModel, getSortedRowModel, SortingState, ColumnFiltersState, VisibilityState } from '@tanstack/react-table';
+import {
+  useReactTable,
+  getCoreRowModel,
+  getPaginationRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
+  SortingState,
+  ColumnFiltersState,
+  VisibilityState
+} from '@tanstack/react-table';
 import { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { UserRole, UserStatus } from '@prisma/client';
 
 interface UsersTableProps {
-    filter?: string;
+  filter?: string;
 }
 
 export function UsersTable({ filter }: UsersTableProps) {
-    const { data: users = [], isLoading } = useUsers();
-    const { mutate: updateUser } = useUpdateUser();
-    const [sorting, setSorting] = useState<SortingState>([]);
-    const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
-    const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
-    const [rowSelection, setRowSelection] = useState({});
+  const { data: users = [], isLoading } = useUsers();
+  const { mutate: updateUser } = useUpdateUser();
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const [rowSelection, setRowSelection] = useState({});
 
-    const handleUpdateRole = (id: string, role: UserRole) => {
-        updateUser({ id, data: { role } });
-    };
+  const handleUpdateRole = (id: string, role: UserRole) => {
+    updateUser({ id, data: { role } });
+  };
 
-    const handleUpdateStatus = (id: string, status: UserStatus) => {
-        updateUser({ id, data: { status } });
-    };
+  const handleUpdateStatus = (id: string, status: UserStatus) => {
+    updateUser({ id, data: { status } });
+  };
 
-    const tableColumns = columns(handleUpdateRole, handleUpdateStatus);
+  const handleUpdatePermissions = (
+    id: string,
+    permissions: Record<string, unknown>
+  ) => {
+    updateUser({ id, data: { permissions } });
+  };
 
-    const table = useReactTable({
-        data: users,
-        columns: tableColumns,
-        onSortingChange: setSorting,
-        onColumnFiltersChange: setColumnFilters,
-        getCoreRowModel: getCoreRowModel(),
-        getPaginationRowModel: getPaginationRowModel(),
-        getSortedRowModel: getSortedRowModel(),
-        getFilteredRowModel: getFilteredRowModel(),
-        onColumnVisibilityChange: setColumnVisibility,
-        onRowSelectionChange: setRowSelection,
-        state: {
-            sorting,
-            columnFilters,
-            columnVisibility,
-            rowSelection,
-        },
-    });
+  const tableColumns = columns(
+    handleUpdateRole,
+    handleUpdateStatus,
+    handleUpdatePermissions
+  );
 
-    if (isLoading) {
-        return <div className="h-48 w-full animate-pulse bg-muted/20 rounded-md" />;
+  const table = useReactTable({
+    data: users,
+    columns: tableColumns,
+    onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    onColumnVisibilityChange: setColumnVisibility,
+    onRowSelectionChange: setRowSelection,
+    state: {
+      sorting,
+      columnFilters,
+      columnVisibility,
+      rowSelection
     }
+  });
 
-    return (
-        <div className="space-y-4">
-            <div className="flex items-center py-4">
-                <Input
-                    placeholder="Filter emails..."
-                    value={(table.getColumn("email")?.getFilterValue() as string) ?? ""}
-                    onChange={(event) =>
-                        table.getColumn("email")?.setFilterValue(event.target.value)
-                    }
-                    className="max-w-sm"
-                />
-            </div>
-            <div className="rounded-md border">
-                <DataTable table={table} />
-            </div>
-        </div>
-    );
+  if (isLoading) {
+    return <div className='bg-muted/20 h-48 w-full animate-pulse rounded-md' />;
+  }
+
+  return (
+    <div className='space-y-4'>
+      <div className='flex items-center py-4'>
+        <Input
+          placeholder='Filter emails...'
+          value={(table.getColumn('email')?.getFilterValue() as string) ?? ''}
+          onChange={(event) =>
+            table.getColumn('email')?.setFilterValue(event.target.value)
+          }
+          className='max-w-sm'
+        />
+      </div>
+      <DataTable table={table} className='h-[560px]' />
+    </div>
+  );
 }

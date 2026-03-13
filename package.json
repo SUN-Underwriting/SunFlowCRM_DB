@@ -20,6 +20,7 @@
     "queue:failed": "npx tsx scripts/queue/check-queues.ts --failed",
     "queue:clean": "npx tsx scripts/queue/check-queues.ts --clean",
     "queue:retry": "npx tsx scripts/queue/check-queues.ts --retry-pending",
+    "users:create-corp": "npx tsx scripts/create-corp-accounts.ts --file scripts/corp-accounts.json --tenant default",
     "prepare": "husky"
   },
   "lint-staged": {

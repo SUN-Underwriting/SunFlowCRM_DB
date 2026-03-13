@@ -64,7 +64,10 @@ export async function PUT(
       // Perform update via service
       const updatedUser = await userService.update(validatedId, {
         ...(updateData.role && { role: updateData.role }),
-        ...(updateData.status && { status: updateData.status })
+        ...(updateData.status && { status: updateData.status }),
+        ...(updateData.permissions !== undefined && {
+          permissions: updateData.permissions
+        })
       });
 
       return apiResponse(updatedUser);
