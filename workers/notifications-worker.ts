@@ -8,7 +8,8 @@ import {
   redisConnection,
   QUEUE_NAME,
   EMAIL_QUEUE_NAME,
-  UW_EMAIL_QUEUE_NAME
+  UW_EMAIL_QUEUE_NAME,
+  USER_INVITE_EMAIL_QUEUE_NAME
 } from '@/server/notifications/queue';
 import { runActivityReminderJob } from '@/server/notifications/activity-reminder-job';
 import { runUnderwritingRenewalJob } from '@/server/notifications/underwriting-renewal-job';
@@ -194,6 +195,16 @@ interface UnderwritingSlipEmailJobData {
   dedupeKey: string;
 }
 
+interface UserInviteEmailJobData {
+  tenantId: string;
+  userId: string;
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+  dedupeKey: string;
+}
+
 const emailWorker = new Worker<EmailJobData>(
   EMAIL_QUEUE_NAME,
   async (job: Job<EmailJobData>) => {
@@ -314,6 +325,41 @@ underwritingEmailWorker.on('failed', (job, err) => {
   console.error(`[UW Email] Job ${job?.id} failed:`, err.message);
 });
 
+const userInviteEmailWorker = new Worker<UserInviteEmailJobData>(
+  USER_INVITE_EMAIL_QUEUE_NAME,
+  async (job: Job<UserInviteEmailJobData>) => {
+    const { to, subject, text, html } = job.data;
+
+    try {
+      const result = await emailService.send({
+        to,
+        subject,
+        text,
+        html
+      });
+
+      console.log(
+        `[Invite Email] Sent invite to ${to} (job=${job.id}, providerMsgId=${result.providerMsgId ?? 'n/a'})`
+      );
+    } catch (err) {
+      console.error(
+        `[Invite Email] Failed to send invite for job ${job.id}:`,
+        err
+      );
+      throw err;
+    }
+  },
+  { connection: redisConnection, concurrency: 2 }
+);
+
+userInviteEmailWorker.on('completed', (job) => {
+  console.log(`[Invite Email] Job ${job.id} completed`);
+});
+
+userInviteEmailWorker.on('failed', (job, err) => {
+  console.error(`[Invite Email] Job ${job?.id} failed:`, err.message);
+});
+
 // Register the repeatable job using upsertJobScheduler (modern BullMQ API).
 // Safe to call on every startup — upsert is idempotent, no duplicate schedules.
 reminderQueue
@@ -374,6 +420,7 @@ async function gracefulShutdown(signal: string) {
       reminderWorker.close(),
       emailWorker.close(),
       underwritingEmailWorker.close(),
+      userInviteEmailWorker.close(),
       reminderQueue.close()
     ]);
     await pool.end();

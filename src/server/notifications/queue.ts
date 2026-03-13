@@ -12,10 +12,12 @@ export const redisConnection = {
 export const QUEUE_NAME = 'notifications';
 export const EMAIL_QUEUE_NAME = 'email-delivery';
 export const UW_EMAIL_QUEUE_NAME = 'underwriting-email';
+export const USER_INVITE_EMAIL_QUEUE_NAME = 'user-invite-email';
 
 let _queue: Queue | null = null;
 let _emailQueue: Queue | null = null;
 let _uwEmailQueue: Queue | null = null;
+let _userInviteEmailQueue: Queue | null = null;
 
 export function getNotificationsQueue(): Queue {
   if (!_queue) {
@@ -62,6 +64,21 @@ export function getUnderwritingEmailQueue(): Queue {
   return _uwEmailQueue;
 }
 
+export function getUserInviteEmailQueue(): Queue {
+  if (!_userInviteEmailQueue) {
+    _userInviteEmailQueue = new Queue(USER_INVITE_EMAIL_QUEUE_NAME, {
+      connection: redisConnection,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: { count: 500 },
+        removeOnFail: { count: 2000 }
+      }
+    });
+  }
+  return _userInviteEmailQueue;
+}
+
 /**
  * Enqueue a job to process an outbox event.
  * Fire-and-forget: call this AFTER the DB transaction commits.
@@ -92,6 +109,16 @@ interface EnqueueUwSlipEmailInput {
   dedupeKey: string;
 }
 
+interface EnqueueUserInviteEmailInput {
+  tenantId: string;
+  userId: string;
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+  dedupeKey: string;
+}
+
 function toBullMqJobId(value: string): string {
   // BullMQ custom job id cannot contain ":".
   return value.replace(/[:\s/\\]+/g, '_');
@@ -107,5 +134,18 @@ export async function enqueueUnderwritingSlipEmailJob(
     });
   } catch (err) {
     console.error('[Notifications] Failed to enqueue underwriting email:', err);
+  }
+}
+
+export async function enqueueUserInviteEmailJob(
+  input: EnqueueUserInviteEmailInput
+) {
+  try {
+    const queue = getUserInviteEmailQueue();
+    await queue.add('send-user-invite', input, {
+      jobId: toBullMqJobId(input.dedupeKey)
+    });
+  } catch (err) {
+    console.error('[Notifications] Failed to enqueue invite email:', err);
   }
 }
