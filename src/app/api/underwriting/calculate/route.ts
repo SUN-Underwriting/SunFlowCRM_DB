@@ -4,6 +4,8 @@ import { apiResponse, handleApiError } from '@/lib/api/response';
 import { prisma } from '@/lib/db/prisma';
 import { calculateYachtPremium } from '@/features/underwriting/rating/engine';
 import type { RiskInput } from '@/features/underwriting/rating/types';
+import { buildQuoteSlipBuffer } from '@/features/underwriting/server/documents';
+import { enqueueUnderwritingSlipEmailJob } from '@/server/notifications/queue';
 
 function genRef(prefix: string) {
   return `${prefix}-${new Date().getFullYear()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
@@ -135,6 +137,52 @@ export async function POST(request: NextRequest) {
           autoDecline: result.autoDecline ?? null
         }
       });
+
+      if (brokerEmail && brokerEmail.trim().length > 0) {
+        const slipBuffer = await buildQuoteSlipBuffer(
+          {
+            reference: submission.reference,
+            vesselName: submission.vesselName,
+            vesselType: submission.vesselType,
+            yearBuilt: submission.yearBuilt,
+            lengthFeet: submission.lengthFeet
+              ? Number(submission.lengthFeet)
+              : null,
+            hullValue: submission.hullValue
+              ? Number(submission.hullValue)
+              : null,
+            territory: submission.territory,
+            useType: submission.useType,
+            brokerName: submission.brokerName,
+            brokerCompany: submission.brokerCompany,
+            brokerEmail: submission.brokerEmail,
+            createdAt: submission.createdAt
+          },
+          {
+            quoteNumber: quote.quoteNumber,
+            totalPremium: quote.totalPremium
+              ? Number(quote.totalPremium)
+              : null,
+            hullPremium: quote.hullPremium ? Number(quote.hullPremium) : null,
+            liabilityPremium: quote.liabilityPremium
+              ? Number(quote.liabilityPremium)
+              : null,
+            validFrom: quote.validFrom,
+            validUntil: quote.validUntil
+          }
+        );
+
+        await enqueueUnderwritingSlipEmailJob({
+          tenantId: user.tenantId,
+          submissionId: submission.id,
+          to: brokerEmail.trim(),
+          subject: `Quote Slip ${submission.reference}`,
+          text: `Dear ${submission.brokerName || 'Broker'},\n\nPlease find attached the quote slip for ${submission.reference}.\n\nRegards,\nSun Underwriting`,
+          filename: `QuoteSlip_${submission.reference}.docx`,
+          contentBase64: slipBuffer.toString('base64'),
+          dedupeKey: `uw-slip:${quote.id}`
+        });
+      }
 
       return apiResponse({ submission, quote, result }, 201);
     });

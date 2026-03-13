@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
+import { withCurrentUser } from '@/lib/auth/get-current-user';
 import {
   Document,
   Packer,
@@ -630,41 +631,57 @@ function buildPolicy(sub: any, quote: any): Document {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await context.params;
+  try {
+    return await withCurrentUser(req, async (user) => {
+      const { id } = await context.params;
 
-  const submission = await prisma.submission.findUnique({
-    where: { id },
-    include: { quotes: { orderBy: { createdAt: 'desc' } } }
-  });
+      const submission = await prisma.submission.findFirst({
+        where: { id, tenantId: user.tenantId, deleted: false },
+        include: { quotes: { orderBy: { createdAt: 'desc' } } }
+      });
 
-  if (!submission) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  }
+      if (!submission) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
 
-  if (submission.status !== 'BOUND') {
+      if (!['BOUND', 'POLICY_ISSUED'].includes(submission.status)) {
+        return NextResponse.json(
+          {
+            error:
+              'Policy is only available for BOUND/POLICY_ISSUED submissions'
+          },
+          { status: 400 }
+        );
+      }
+
+      const quote =
+        submission.quotes.find((q) => q.status === 'BOUND') ??
+        submission.quotes[0];
+
+      const doc = buildPolicy(submission, quote);
+      const buffer = await Packer.toBuffer(doc);
+
+      const policyNumber =
+        submission.policyNumber ??
+        `POL-${submission.reference.replace('SUN-', '')}`;
+
+      return new NextResponse(new Uint8Array(buffer), {
+        status: 200,
+        headers: {
+          'Content-Type':
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'Content-Disposition': `attachment; filename="Policy_${policyNumber}.docx"`
+        }
+      });
+    });
+  } catch (err) {
+    console.error('[policy] Error:', err);
     return NextResponse.json(
-      { error: 'Policy is only available for BOUND submissions' },
-      { status: 400 }
+      { error: 'Failed to generate policy', detail: String(err) },
+      { status: 500 }
     );
   }
-
-  const quote =
-    submission.quotes.find((q) => q.status === 'BOUND') ?? submission.quotes[0];
-
-  const doc = buildPolicy(submission, quote);
-  const buffer = await Packer.toBuffer(doc);
-
-  const policyNumber = `POL-${submission.reference.replace('SUN-', '')}`;
-
-  return new NextResponse(new Uint8Array(buffer), {
-    status: 200,
-    headers: {
-      'Content-Type':
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'Content-Disposition': `attachment; filename="Policy_${policyNumber}.docx"`
-    }
-  });
 }

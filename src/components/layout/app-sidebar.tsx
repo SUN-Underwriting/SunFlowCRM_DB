@@ -21,6 +21,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
@@ -88,15 +89,24 @@ export default function AppSidebar() {
                   className='group/collapsible'
                 >
                   <SidebarMenuItem>
-                    <CollapsibleTrigger asChild>
-                      <SidebarMenuButton
-                        tooltip={item.title}
-                        isActive={pathname === item.url}
-                      >
+                    <SidebarMenuButton
+                      asChild
+                      tooltip={item.title}
+                      isActive={pathname === item.url}
+                    >
+                      <Link href={item.url}>
                         {item.icon && <Icon />}
                         <span>{item.title}</span>
-                        <IconChevronRight className='ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90' />
-                      </SidebarMenuButton>
+                      </Link>
+                    </SidebarMenuButton>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuAction
+                        className='top-2'
+                        showOnHover={false}
+                        aria-label={`Toggle ${item.title} menu`}
+                      >
+                        <IconChevronRight className='transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90' />
+                      </SidebarMenuAction>
                     </CollapsibleTrigger>
                     <CollapsibleContent>
                       <SidebarMenuSub>

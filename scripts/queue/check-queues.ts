@@ -16,13 +16,14 @@ const parsed = new URL(REDIS_URL);
 const connection = {
   host: parsed.hostname,
   port: Number(parsed.port) || 6379,
-  ...(parsed.password && { password: parsed.password }),
+  ...(parsed.password && { password: parsed.password })
 };
 
 const QUEUES = [
   'notifications',
   'email-delivery',
-  'activity-reminders',
+  'underwriting-email',
+  'activity-reminders'
 ] as const;
 
 const args = process.argv.slice(2);
@@ -39,7 +40,7 @@ const c = {
   yellow: '\x1b[33m',
   red: '\x1b[31m',
   cyan: '\x1b[36m',
-  gray: '\x1b[90m',
+  gray: '\x1b[90m'
 };
 
 function col(text: string | number, color: string) {
@@ -53,7 +54,9 @@ function badge(n: number) {
 }
 
 async function main() {
-  console.log(`\n${col('BullMQ Queue Status', c.bold + c.cyan)}  ${col(new Date().toLocaleString(), c.gray)}\n`);
+  console.log(
+    `\n${col('BullMQ Queue Status', c.bold + c.cyan)}  ${col(new Date().toLocaleString(), c.gray)}\n`
+  );
   console.log(`${col('Redis:', c.dim)} ${REDIS_URL}\n`);
 
   const header = `${'Queue'.padEnd(22)} ${'Wait'.padStart(5)} ${'Active'.padStart(7)} ${'Delayed'.padStart(8)} ${'Done'.padStart(6)} ${'Failed'.padStart(7)}`;
@@ -71,17 +74,17 @@ async function main() {
       q.getActiveCount(),
       q.getDelayedCount(),
       q.getCompletedCount(),
-      q.getFailedCount(),
+      q.getFailedCount()
     ]);
 
     const activeStr = active > 0 ? col(active, c.green) : col(active, c.dim);
     const line = [
       col(name.padEnd(22), c.bold),
-      badge(waiting).padStart(5 + 9),       // +9 for ANSI escape codes
+      badge(waiting).padStart(5 + 9), // +9 for ANSI escape codes
       activeStr.padStart(7 + 9),
       badge(delayed).padStart(8 + 9),
       col(completed, c.dim).padStart(6 + 9),
-      badge(failed).padStart(7 + 9),
+      badge(failed).padStart(7 + 9)
     ].join(' ');
 
     console.log(line);
@@ -90,7 +93,9 @@ async function main() {
       const failedJobs = await q.getFailed(0, Math.min(failed - 1, 9));
       for (const job of failedJobs) {
         const reason = (job.failedReason ?? '').split('\n')[0].slice(0, 100);
-        console.log(`  ${col('↳', c.red)} [${col(job.id ?? '?', c.yellow)}] ${col(job.name, c.bold)} — ${col(reason, c.dim)}`);
+        console.log(
+          `  ${col('↳', c.red)} [${col(job.id ?? '?', c.yellow)}] ${col(job.name, c.bold)} — ${col(reason, c.dim)}`
+        );
       }
       if (failed > 10) {
         console.log(`  ${col(`  … and ${failed - 10} more`, c.gray)}`);
@@ -99,7 +104,9 @@ async function main() {
 
     if (doClean && failed > 0) {
       await q.clean(0, failed, 'failed');
-      console.log(`  ${col('✓ Cleaned', c.green)} ${failed} failed jobs from ${col(name, c.bold)}`);
+      console.log(
+        `  ${col('✓ Cleaned', c.green)} ${failed} failed jobs from ${col(name, c.bold)}`
+      );
     }
   }
 
@@ -118,7 +125,7 @@ async function main() {
       prisma.outboxEvent.count({ where: { status: 'PENDING' } }),
       prisma.outboxEvent.count({ where: { status: 'PROCESSING' } }),
       prisma.outboxEvent.count({ where: { status: 'FAILED' } }),
-      prisma.outboxEvent.count(),
+      prisma.outboxEvent.count()
     ]);
 
     console.log(`\n${col('OutboxEvent table', c.bold)}`);
@@ -133,7 +140,7 @@ async function main() {
       const pendingEvents = await prisma.outboxEvent.findMany({
         where: { status: 'PENDING' },
         select: { id: true, type: true },
-        take: 100,
+        take: 100
       });
       let enqueued = 0;
       for (const ev of pendingEvents) {
@@ -145,13 +152,15 @@ async function main() {
         enqueued++;
       }
       await notifQueue.close();
-      console.log(`  ${col(`✓ Re-enqueued ${enqueued} pending outbox events`, c.green)}`);
+      console.log(
+        `  ${col(`✓ Re-enqueued ${enqueued} pending outbox events`, c.green)}`
+      );
     }
 
     const [delivPending, delivFailed, delivSent] = await Promise.all([
       prisma.notificationDelivery.count({ where: { status: 'PENDING' } }),
       prisma.notificationDelivery.count({ where: { status: 'FAILED' } }),
-      prisma.notificationDelivery.count({ where: { status: 'SENT' } }),
+      prisma.notificationDelivery.count({ where: { status: 'SENT' } })
     ]);
 
     console.log(`\n${col('NotificationDelivery table', c.bold)}`);
@@ -162,20 +171,29 @@ async function main() {
     await prisma.$disconnect();
     await pool.end();
   } catch (err) {
-    console.log(`\n${col('DB check skipped:', c.yellow)} ${err instanceof Error ? err.message : String(err)}`);
+    console.log(
+      `\n${col('DB check skipped:', c.yellow)} ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 
   // ─── Upcoming reminder jobs ───────────────────────────────────────────────
-  const reminderQueue = queues.find((_, i) => QUEUES[i] === 'activity-reminders');
+  const reminderQueue = queues.find(
+    (_, i) => QUEUES[i] === 'activity-reminders'
+  );
   if (reminderQueue) {
     const delayed = await reminderQueue.getDelayed(0, 2);
     if (delayed.length > 0) {
       console.log(`\n${col('Next reminder scans', c.bold)}`);
       for (const job of delayed) {
         const runAt = job.opts.delay
-          ? new Date(Date.now() + (job.opts.delay - (Date.now() - (job.timestamp ?? 0)))).toLocaleTimeString()
+          ? new Date(
+              Date.now() +
+                (job.opts.delay - (Date.now() - (job.timestamp ?? 0)))
+            ).toLocaleTimeString()
           : 'soon';
-        console.log(`  ${col('→', c.cyan)} ${job.name}  ${col('~' + runAt, c.gray)}`);
+        console.log(
+          `  ${col('→', c.cyan)} ${job.name}  ${col('~' + runAt, c.gray)}`
+        );
       }
     }
   }

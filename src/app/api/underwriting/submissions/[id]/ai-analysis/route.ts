@@ -1,5 +1,6 @@
 // src/app/api/underwriting/submissions/[id]/ai-analysis/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { withCurrentUser } from '@/lib/auth/get-current-user';
 import { prisma } from '@/lib/db/prisma';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -105,92 +106,99 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json(
-      { error: 'ANTHROPIC_API_KEY is not configured' },
-      { status: 500 }
-    );
-  }
-
-  // 1. Load submission
-  const submission = await prisma.submission.findUnique({
-    where: { id }
-  });
-
-  if (!submission) {
-    return NextResponse.json(
-      { error: 'Submission not found' },
-      { status: 404 }
-    );
-  }
-
-  // 2. Call Claude API
-  let analysisResult: AIAnalysisResult;
-
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1500,
-        messages: [
-          {
-            role: 'user',
-            content: buildPrompt(
-              submission as unknown as Record<string, unknown>
-            )
-          }
-        ]
-      })
+    return await withCurrentUser(req, async (user) => {
+      const { id } = await params;
+
+      if (!process.env.ANTHROPIC_API_KEY) {
+        return NextResponse.json(
+          { error: 'ANTHROPIC_API_KEY is not configured' },
+          { status: 500 }
+        );
+      }
+
+      // 1. Load submission in tenant scope
+      const submission = await prisma.submission.findFirst({
+        where: { id, tenantId: user.tenantId, deleted: false }
+      });
+
+      if (!submission) {
+        return NextResponse.json(
+          { error: 'Submission not found' },
+          { status: 404 }
+        );
+      }
+
+      // 2. Call Claude API
+      let analysisResult: AIAnalysisResult;
+
+      try {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': process.env.ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 1500,
+            messages: [
+              {
+                role: 'user',
+                content: buildPrompt(
+                  submission as unknown as Record<string, unknown>
+                )
+              }
+            ]
+          })
+        });
+
+        if (!response.ok) {
+          const err = await response.text();
+          console.error('Anthropic API error:', err);
+          return NextResponse.json(
+            { error: 'AI service unavailable', details: err },
+            { status: 502 }
+          );
+        }
+
+        const data = await response.json();
+        const rawText = data.content?.[0]?.text ?? '';
+
+        // Strip markdown fences if present
+        const clean = rawText.replace(/```json\n?|\n?```/g, '').trim();
+        const parsed = JSON.parse(clean);
+
+        analysisResult = {
+          ...parsed,
+          generatedAt: new Date().toISOString(),
+          modelVersion: 'claude-sonnet-4-20250514'
+        };
+      } catch (err) {
+        console.error('AI analysis failed:', err);
+        return NextResponse.json(
+          { error: 'Failed to parse AI response' },
+          { status: 500 }
+        );
+      }
+
+      // 3. Persist to DB
+      await prisma.submission.update({
+        where: { id },
+        data: {
+          aiAnalysis: analysisResult as object,
+          aiModelVersion: analysisResult.modelVersion,
+          aiAnalyzedAt: new Date()
+        }
+      });
+
+      return NextResponse.json(analysisResult);
     });
-
-    if (!response.ok) {
-      const err = await response.text();
-      console.error('Anthropic API error:', err);
-      return NextResponse.json(
-        { error: 'AI service unavailable', details: err },
-        { status: 502 }
-      );
-    }
-
-    const data = await response.json();
-    const rawText = data.content?.[0]?.text ?? '';
-
-    // Strip markdown fences if present
-    const clean = rawText.replace(/```json\n?|\n?```/g, '').trim();
-    const parsed = JSON.parse(clean);
-
-    analysisResult = {
-      ...parsed,
-      generatedAt: new Date().toISOString(),
-      modelVersion: 'claude-sonnet-4-20250514'
-    };
-  } catch (err) {
-    console.error('AI analysis failed:', err);
-    return NextResponse.json(
-      { error: 'Failed to parse AI response' },
-      { status: 500 }
-    );
+  } catch (error) {
+    console.error('[UW ai-analysis POST] Error:', error);
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-
-  // 3. Persist to DB
-  await prisma.submission.update({
-    where: { id },
-    data: {
-      aiAnalysis: analysisResult as object,
-      aiModelVersion: analysisResult.modelVersion,
-      aiAnalyzedAt: new Date()
-    }
-  });
-
-  return NextResponse.json(analysisResult);
 }
 
 // ─── GET /api/underwriting/submissions/[id]/ai-analysis ──────────────────────
@@ -200,28 +208,35 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  try {
+    return await withCurrentUser(req, async (user) => {
+      const { id } = await params;
 
-  const submission = await prisma.submission.findUnique({
-    where: { id },
-    select: {
-      aiAnalysis: true,
-      aiAnalyzedAt: true,
-      aiModelVersion: true
-    }
-  });
+      const submission = await prisma.submission.findFirst({
+        where: { id, tenantId: user.tenantId, deleted: false },
+        select: {
+          aiAnalysis: true,
+          aiAnalyzedAt: true,
+          aiModelVersion: true
+        }
+      });
 
-  if (!submission) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      if (!submission) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+
+      if (!submission.aiAnalysis) {
+        return NextResponse.json({ analysis: null });
+      }
+
+      return NextResponse.json({
+        analysis: submission.aiAnalysis,
+        analyzedAt: submission.aiAnalyzedAt,
+        modelVersion: submission.aiModelVersion
+      });
+    });
+  } catch (error) {
+    console.error('[UW ai-analysis GET] Error:', error);
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-
-  if (!submission.aiAnalysis) {
-    return NextResponse.json({ analysis: null });
-  }
-
-  return NextResponse.json({
-    analysis: submission.aiAnalysis,
-    analyzedAt: submission.aiAnalyzedAt,
-    modelVersion: submission.aiModelVersion
-  });
 }

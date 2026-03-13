@@ -11,6 +11,11 @@ export interface EmailMessage {
   text: string;
   /** Optional HTML body — if not provided, text is used. */
   html?: string;
+  attachments?: Array<{
+    filename: string;
+    contentType?: string;
+    content: Buffer;
+  }>;
 }
 
 export interface EmailServiceResult {
@@ -30,6 +35,7 @@ class ConsoleEmailService implements IEmailService {
     console.log('[EmailService] [MOCK] Sending email:', {
       to: message.to,
       subject: message.subject,
+      attachments: message.attachments?.map((a) => a.filename) ?? []
     });
     return { providerMsgId: `mock-${Date.now()}` };
   }
