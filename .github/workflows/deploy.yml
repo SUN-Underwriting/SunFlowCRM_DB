@@ -1,0 +1,139 @@
+name: Deploy — Production (Mac Mini)
+
+on:
+  push:
+    branches:
+      - main
+
+# Запрещаем параллельные деплои: новый деплой ждёт завершения предыдущего,
+# отменить предыдущий нельзя — это защита от гонок на production
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Mac Mini
+    runs-on: [self-hosted, mac-mini-prod]
+    timeout-minutes: 30
+
+    # Путь к production .env на сервере (устанавливается один раз вручную — см. docs/CICD_RUNNER_SETUP.md)
+    env:
+      PROD_ENV_FILE: /Users/sun_serv/Documents/sunflow_secret/.env.prod
+      COMPOSE_FILE: docker-compose.prod.yml
+      APP_URL: https://testcloud24.com
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          clean: true
+
+      # ── Предполётная проверка ──────────────────────────────────────────────
+      - name: Verify production .env exists on server
+        run: |
+          if [ ! -f "$PROD_ENV_FILE" ]; then
+            echo "::error::Production .env not found at $PROD_ENV_FILE"
+            echo "Follow docs/CICD_RUNNER_SETUP.md Step 2 to place it on the server."
+            exit 1
+          fi
+          echo "Production .env found: OK"
+
+      - name: Validate compose config
+        run: |
+          docker compose -f "$COMPOSE_FILE" --env-file "$PROD_ENV_FILE" config --quiet
+          echo "Compose config: OK"
+
+      # ── Сборка ────────────────────────────────────────────────────────────
+      - name: Build Docker images
+        run: |
+          docker compose -f "$COMPOSE_FILE" --env-file "$PROD_ENV_FILE" build \
+            --build-arg BUILDKIT_INLINE_CACHE=1
+        env:
+          DOCKER_BUILDKIT: 1
+          COMPOSE_DOCKER_CLI_BUILD: 1
+
+      # ── Деплой ────────────────────────────────────────────────────────────
+      - name: Apply database migrations
+        run: |
+          docker compose -f "$COMPOSE_FILE" --env-file "$PROD_ENV_FILE" \
+            run --rm migrate
+          echo "Migrations: OK"
+
+      - name: Restart application stack
+        run: |
+          docker compose -f "$COMPOSE_FILE" --env-file "$PROD_ENV_FILE" \
+            up -d --remove-orphans
+          echo "Stack started: OK"
+
+      # ── Проверки после деплоя ─────────────────────────────────────────────
+      - name: Wait for app to become healthy
+        run: |
+          echo "Waiting for containers to report healthy..."
+          sleep 15
+
+          # Проверяем статус всех контейнеров
+          docker compose -f "$COMPOSE_FILE" --env-file "$PROD_ENV_FILE" ps
+
+          # Проверяем конкретные сервисы
+          for service in postgres redis app worker; do
+            STATUS=$(docker compose -f "$COMPOSE_FILE" --env-file "$PROD_ENV_FILE" \
+              ps --format json "$service" 2>/dev/null | \
+              python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('Health','') or d.get('Status',''))" 2>/dev/null || echo "unknown")
+            echo "Service $service: $STATUS"
+          done
+
+      - name: HTTP health check — app
+        run: |
+          MAX_RETRIES=12
+          SLEEP=10
+          for i in $(seq 1 $MAX_RETRIES); do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 10 "$APP_URL/api/health" 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" -lt 500 ] && [ "$HTTP_CODE" -ge 200 ]; then
+              echo "App responded with HTTP $HTTP_CODE — healthy"
+              exit 0
+            fi
+            echo "Attempt $i/$MAX_RETRIES: HTTP $HTTP_CODE — waiting ${SLEEP}s..."
+            sleep $SLEEP
+          done
+          echo "::error::App did not become healthy after $((MAX_RETRIES * SLEEP))s"
+          docker compose -f "$COMPOSE_FILE" --env-file "$PROD_ENV_FILE" logs --tail=50 app
+          exit 1
+
+      - name: HTTP health check — stack-auth API
+        run: |
+          STACK_API_URL=$(grep -E '^NEXT_PUBLIC_STACK_API_URL=' "$PROD_ENV_FILE" | cut -d= -f2- | tr -d '"')
+          if [ -z "$STACK_API_URL" ]; then
+            echo "NEXT_PUBLIC_STACK_API_URL not set, skipping stack-auth check"
+            exit 0
+          fi
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$STACK_API_URL/" || echo "000")
+          echo "Stack Auth API: HTTP $HTTP_CODE"
+          if [ "$HTTP_CODE" -ge 500 ] || [ "$HTTP_CODE" = "000" ]; then
+            echo "::warning::Stack Auth API returned $HTTP_CODE — check stack-server container"
+          fi
+
+      # ── Уведомление об успехе ─────────────────────────────────────────────
+      - name: Print deploy summary
+        if: success()
+        run: |
+          COMMIT_SHORT="${{ github.sha }}"
+          echo ""
+          echo "=========================================="
+          echo "  DEPLOY SUCCESSFUL"
+          echo "  Commit: ${COMMIT_SHORT:0:7}"
+          echo "  Branch: ${{ github.ref_name }}"
+          echo "  App: $APP_URL"
+          echo "=========================================="
+
+      # ── При ошибке — показать логи ────────────────────────────────────────
+      - name: Show container logs on failure
+        if: failure()
+        run: |
+          echo "=== Last 100 lines from app ==="
+          docker compose -f "$COMPOSE_FILE" --env-file "$PROD_ENV_FILE" logs --tail=100 app || true
+          echo "=== Last 50 lines from worker ==="
+          docker compose -f "$COMPOSE_FILE" --env-file "$PROD_ENV_FILE" logs --tail=50 worker || true
+          echo "=== Container statuses ==="
+          docker compose -f "$COMPOSE_FILE" --env-file "$PROD_ENV_FILE" ps || true

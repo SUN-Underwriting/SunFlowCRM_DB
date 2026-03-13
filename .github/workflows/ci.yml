@@ -1,0 +1,105 @@
+name: CI — Pull Request Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+
+# Отменять предыдущие запуски для той же PR при новом пуше
+concurrency:
+  group: ci-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-typecheck:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps --ignore-scripts
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run TypeScript type check
+        run: npx tsc --noEmit
+
+  compose-config-check:
+    name: Docker Compose Config Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml (dev)
+        run: docker compose -f docker-compose.yml config --quiet
+
+      # Для prod-стека используем env.prod.example — проверяет синтаксис без реальных секретов
+      - name: Copy env example for validation
+        run: |
+          if [ -f env.prod.example ]; then
+            cp env.prod.example .env.prod.ci
+          else
+            # Создаём минимальный .env чтобы compose config прошёл без ошибок
+            cat > .env.prod.ci <<'EOF'
+          POSTGRES_DB=sun_uw
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=ci_placeholder
+          REDIS_PASSWORD=ci_placeholder
+          STACK_DB_PASSWORD=ci_placeholder
+          CLICKHOUSE_PASSWORD=ci_placeholder
+          STACK_SERVER_SECRET=ci_placeholder_32_chars_long_here_x
+          NEXT_PUBLIC_STACK_API_URL=https://auth-api.example.com
+          NEXT_PUBLIC_STACK_URL=https://auth.example.com
+          STACK_API_PORT=8102
+          STACK_DASHBOARD_PORT=8101
+          NEXT_PUBLIC_APP_URL=https://example.com
+          NEXT_PUBLIC_STACK_PROJECT_ID=placeholder
+          NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY=placeholder
+          NEXT_PUBLIC_STACK_PUBLISHABLE_KEY=placeholder
+          STACK_SECRET_SERVER_KEY=placeholder
+          INTERNAL_WORKER_SECRET=ci_placeholder_32_chars_long_here_x
+          APP_PORT=3000
+          EOF
+          fi
+
+      - name: Validate docker-compose.prod.yml (syntax only)
+        run: docker compose -f docker-compose.prod.yml --env-file .env.prod.ci config --quiet
+
+  dockerfile-check:
+    name: Dockerfile Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint Dockerfile (app)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          # Отключаем предупреждения о закреплении версий тегов — в prod-образах это нормально
+          ignore: DL3018,DL3008,SC2086
+
+      - name: Lint Dockerfile (stack-auth)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile.stack-auth
+          ignore: DL3018,DL3008,SC2086
