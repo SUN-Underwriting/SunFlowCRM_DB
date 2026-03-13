@@ -17,19 +17,24 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 30
 
-    # Путь к production .env на сервере (устанавливается один раз вручную — см. docs/CICD_RUNNER_SETUP.md)
+    # Деплой выполняется из постоянной директории проекта на Mac Mini,
+    # чтобы docker compose управлял одним и тем же production-стеком.
     env:
+      DEPLOY_DIR: /Users/sun_serv/Documents/Dev/SunFlow
       PROD_ENV_FILE: /Users/sun_serv/Documents/sunflow_secret/.env.prod
-      COMPOSE_FILE: docker-compose.prod.yml
+      COMPOSE_FILE: /Users/sun_serv/Documents/Dev/SunFlow/docker-compose.prod.yml
       APP_URL: https://testcloud24.com
 
     steps:
-      - name: Checkout main
-        uses: actions/checkout@v4
-        with:
-          clean: true
-
       # ── Предполётная проверка ──────────────────────────────────────────────
+      - name: Verify deploy directory exists
+        run: |
+          if [ ! -d "$DEPLOY_DIR/.git" ]; then
+            echo "::error::Deploy directory $DEPLOY_DIR is missing or is not a git repository"
+            exit 1
+          fi
+          echo "Deploy directory found: OK"
+
       - name: Verify production .env exists on server
         run: |
           if [ ! -f "$PROD_ENV_FILE" ]; then
@@ -38,6 +43,23 @@ jobs:
             exit 1
           fi
           echo "Production .env found: OK"
+
+      - name: Ensure deploy directory is clean
+        run: |
+          if [ -n "$(git -C "$DEPLOY_DIR" status --porcelain)" ]; then
+            echo "::error::Deploy directory has uncommitted changes: $DEPLOY_DIR"
+            echo "Commit, stash, or remove local changes before running autodeploy."
+            git -C "$DEPLOY_DIR" status --short
+            exit 1
+          fi
+          echo "Deploy directory is clean: OK"
+
+      - name: Sync deploy directory to latest main
+        run: |
+          git -C "$DEPLOY_DIR" fetch origin main
+          git -C "$DEPLOY_DIR" checkout main
+          git -C "$DEPLOY_DIR" pull --ff-only origin main
+          echo "Deploy directory synced: OK"
 
       - name: Validate compose config
         run: |
